@@ -10,7 +10,8 @@
         "resolveJsonModule": true,
         "isolatedModules": true,
         "noEmit": true,
-        "allowImportingTsExtensions": true
+        "allowImportingTsExtensions": true,
+        "types": ["node"]
     },
     "include": ["src/**/*.ts", "tests/**/*.ts"]
 }
