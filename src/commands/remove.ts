@@ -4,7 +4,7 @@ import { normalizeHook, runHook } from "../hooks.ts";
 import { loadGroup, saveGroup } from "../state.ts";
 import { wireGroup } from "../wiring.ts";
 
-export function removeCommand(groupName: string, repoName: string): void {
+export async function removeCommand(groupName: string, repoName: string): Promise<void> {
     const { config } = loadConfig();
     const group = loadGroup(config, groupName);
     if (!group) {
@@ -23,7 +23,7 @@ export function removeCommand(groupName: string, repoName: string): void {
         try {
             console.log(`[${repoName}] teardown hook`);
             const cwd = teardownHook.cwd === "repo" ? expandPath(repoCfg.path) : member.path;
-            runHook(teardownHook.command, cwd);
+            await runHook(teardownHook.command, cwd);
         } catch (err) {
             console.error(`[${repoName}] teardown failed: ${err instanceof Error ? err.message : err}`);
         }

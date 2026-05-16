@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
-import { createSandbox, trace, type Sandbox } from "../helpers/sandbox.ts";
+import { createSandbox, trace, traceThenFail, type Sandbox } from "../helpers/sandbox.ts";
 
 describe("add and remove", () => {
     let sb: Sandbox;
@@ -85,5 +85,34 @@ describe("add and remove", () => {
         const r = runMultree(sb, ["remove", "g", "frontend"]);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /not in group/);
+    });
+
+    // Regression: removeCommand used to fire-and-forget the async teardown
+    // hook, so a failing teardown produced an unhandled-rejection abort
+    // (non-zero exit) instead of the caught warning the user sees today.
+    it("logs but does not fail when a teardown hook exits non-zero", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    setup: trace("api:setup"),
+                    teardown: traceThenFail("api:teardown"),
+                },
+            ],
+        });
+
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        const r = runMultree(sb, ["remove", "g", "api"]);
+
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stderr, /teardown failed/);
+        assert.doesNotMatch(r.stderr, /UnhandledPromiseRejection/);
+        // Worktree still removed and state updated despite the hook failure.
+        assert.equal(existsSync(sb.worktreePath("g", "api")), false);
+        assert.equal(sb.state("g")?.members.api, undefined);
+        // The hook itself ran (trace line written) before exit 1.
+        assert.ok(sb.trace().includes("api:teardown"));
     });
 });

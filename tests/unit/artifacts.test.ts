@@ -94,6 +94,28 @@ describe("primeArtifacts (copy strategy)", () => {
         assert.equal(existsSync(join(dst, "deep", "nested", "node_modules", "marker")), true);
         assert.equal(existsSync(join(dst, "node_modules")), false);
     });
+
+    // Regression: artifacts used to shell-interpolate the find pattern and
+    // src/dst paths, so a `$` in a name would expand to an empty variable and
+    // silently miss the directory. Argv-form invocation passes them literally.
+    it("'find' handles a basename containing a $ character", () => {
+        const weird = "node$modules";
+        mkdirSync(join(src, "packages", "a", weird), { recursive: true });
+        writeFileSync(join(src, "packages", "a", weird, "marker"), "ok");
+        primeArtifacts(src, dst, [{ find: weird, strategy: "copy" }]);
+        assert.equal(
+            readFileSync(join(dst, "packages", "a", weird, "marker"), "utf-8"),
+            "ok",
+        );
+    });
+
+    it("'path' handles a directory name containing a $ character", () => {
+        const weird = "out$dir";
+        mkdirSync(join(src, weird), { recursive: true });
+        writeFileSync(join(src, weird, "marker"), "ok");
+        primeArtifacts(src, dst, [{ path: weird, strategy: "copy" }]);
+        assert.equal(readFileSync(join(dst, weird, "marker"), "utf-8"), "ok");
+    });
 });
 
 function readDirSafe(p: string): string[] {

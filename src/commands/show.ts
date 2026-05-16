@@ -5,8 +5,7 @@ export function showCommand(name: string): void {
     const { config } = loadConfig();
     const group = loadGroup(config, name);
     if (!group) {
-        console.error(`Group not found: ${name}`);
-        process.exit(1);
+        throw new Error(`Group not found: ${name}`);
     }
     console.log(`Group: ${group.name}`);
     console.log(`Branch: ${group.branch}`);
