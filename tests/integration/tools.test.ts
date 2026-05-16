@@ -74,6 +74,21 @@ describe("tool dispatch", () => {
         assert.equal(readFileSync(marker, "utf-8").trim(), sb.worktreePath("g", "frontend"));
     });
 
+    it("defaults to $root when open_in is omitted entirely", () => {
+        const marker = join(sb.root, "default-cwd-marker.txt");
+        patchManifest(sb, cfg => {
+            cfg.tools = {
+                // No open_in: resolveCwd treats this the same as ["$root"].
+                stamp: { command: `echo "{cwd}" > "${marker}"` },
+            };
+        });
+
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        const r = runMultree(sb, ["stamp", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(readFileSync(marker, "utf-8").trim(), join(sb.worktreeRoot, "g"));
+    });
+
     it("falls back to $root when no member in the chain is present", () => {
         const marker = join(sb.root, "fallback-marker.txt");
         patchManifest(sb, cfg => {

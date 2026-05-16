@@ -218,6 +218,38 @@ describe("create --verbose", () => {
     });
 });
 
+// HookCmd object form with cwd: "repo" runs the hook in the source repo
+// directory rather than the worktree. Unit tests cover normalizeHook on the
+// object form; this pins the manifest round-trip and the cwd choice.
+describe("create with hook object form (cwd: repo)", () => {
+    let sb: Sandbox;
+    beforeEach(() => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    setup: {
+                        command: "echo from-repo-cwd > marker-in-repo.txt",
+                        cwd: "repo",
+                    },
+                },
+            ],
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    it("runs the hook in the source repo, not the worktree", () => {
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const repoMarker = join(sb.repoPath("api"), "marker-in-repo.txt");
+        const worktreeMarker = join(sb.worktreePath("g", "api"), "marker-in-repo.txt");
+        assert.ok(existsSync(repoMarker), "marker should land in the source repo dir");
+        assert.equal(existsSync(worktreeMarker), false, "marker must not land in the worktree");
+    });
+});
+
 // parseJobs in cli.ts rejects non-positive and non-numeric values up-front,
 // before any fetch / worktree work is attempted.
 describe("create --jobs validation", () => {
