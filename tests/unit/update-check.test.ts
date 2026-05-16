@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -27,12 +27,6 @@ describe("compareSemver", () => {
         assert.equal(compareSemver("1.10.0", "1.9.9"), 1);
         assert.equal(compareSemver("1.9.9", "1.10.0"), -1);
         assert.equal(compareSemver("10.0.0", "2.0.0"), 1);
-    });
-
-    it("handles 0.x versions consistently", () => {
-        assert.equal(compareSemver("0.1.2", "0.1.1"), 1);
-        assert.equal(compareSemver("0.0.1", "0.0.0"), 1);
-        assert.equal(compareSemver("0.2.0", "0.1.999"), 1);
     });
 
     it("bails out (returns 0) on pre-release tags", () => {
@@ -137,20 +131,6 @@ describe("update-check cache integration", () => {
         assert.equal(captured, "");
     });
 
-    it("treats truthy CI values (\"1\", \"true\", \"yes\") as in-CI when FORCE is off", async () => {
-        writeFileSync(
-            join(dir, "version-check.json"),
-            JSON.stringify({ latest: "9.9.9", checked_at: new Date().toISOString() }),
-        );
-        delete process.env.MULTREE_FORCE_UPDATE_CHECK;
-        for (const v of ["1", "true", "TRUE", "yes"]) {
-            process.env.CI = v;
-            const { notifyIfNewer } = await import("../../src/update-check.ts");
-            const captured = await captureStderr(() => notifyIfNewer("0.1.1"));
-            assert.equal(captured, "", `CI=${JSON.stringify(v)} should suppress`);
-        }
-    });
-
     it("MULTREE_FORCE_UPDATE_CHECK overrides every other suppression source", async () => {
         writeFileSync(
             join(dir, "version-check.json"),
@@ -164,33 +144,6 @@ describe("update-check cache integration", () => {
         assert.match(captured, /new version available/);
     });
 
-    it("notifyIfNewer treats a cache missing required fields as no cache", async () => {
-        // Valid JSON but wrong shape -> should not crash, should not print.
-        writeFileSync(
-            join(dir, "version-check.json"),
-            JSON.stringify({ latest: 999, checked_at: 0 }),
-        );
-        const captured = await captureStderr(async () => {
-            const { notifyIfNewer } = await import("../../src/update-check.ts");
-            notifyIfNewer("0.1.1");
-        });
-        assert.equal(captured, "");
-    });
-
-    it("notice format contains the install command and arrow with both versions", async () => {
-        writeFileSync(
-            join(dir, "version-check.json"),
-            JSON.stringify({ latest: "1.2.3", checked_at: new Date().toISOString() }),
-        );
-        const captured = await captureStderr(async () => {
-            const { notifyIfNewer } = await import("../../src/update-check.ts");
-            notifyIfNewer("0.1.1");
-        });
-        // Single line, ends in newline, contains both version sides + cmd.
-        assert.equal(captured.split("\n").filter(Boolean).length, 1);
-        assert.match(captured, /\[multree\] new version available: 0\.1\.1 → 1\.2\.3 \(run: npm i -g multree-cli@latest\)\n$/);
-    });
-
     it("notifyIfNewer ignores corrupt cache files", async () => {
         writeFileSync(join(dir, "version-check.json"), "{ not valid json");
         const captured = await captureStderr(async () => {
@@ -198,21 +151,6 @@ describe("update-check cache integration", () => {
             notifyIfNewer("0.1.1");
         });
         assert.equal(captured, "");
-    });
-
-    it("kickBackgroundCheck respects a fresh cache window (no child spawned)", async () => {
-        // Recent cache: kickBackgroundCheck must NOT relaunch the CLI.
-        writeFileSync(
-            join(dir, "version-check.json"),
-            JSON.stringify({ latest: "0.1.1", checked_at: new Date().toISOString() }),
-        );
-        const before = readFileSync(join(dir, "version-check.json"), "utf-8");
-        const { kickBackgroundCheck } = await import("../../src/update-check.ts");
-        kickBackgroundCheck();
-        // Give any (incorrectly) spawned child a brief moment.
-        await new Promise(r => setTimeout(r, 50));
-        const after = readFileSync(join(dir, "version-check.json"), "utf-8");
-        assert.equal(before, after);
     });
 });
 

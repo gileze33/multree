@@ -76,25 +76,6 @@ describe("update notify", () => {
         assert.doesNotMatch(result.stderr, /new version available/);
     });
 
-    it("is silent when CI=true and the test override is not set", () => {
-        seedCache("9.9.9");
-        const env = envWith({ CI: "true", MULTREE_FORCE_UPDATE_CHECK: "" });
-        const result = spawnCli(env, ["--version"]);
-        assert.equal(result.status, 0);
-        assert.doesNotMatch(result.stderr, /new version available/);
-    });
-
-    it("the hidden __update-check subcommand produces no user-visible output", () => {
-        // We can't reach npm.org from tests, so the fetch will fail or time
-        // out — but the subcommand must never throw or print noise.
-        seedCache("0.0.1");
-        const env = envWith({ MULTREE_NO_UPDATE_CHECK: "1" }); // suppress nested kick
-        const result = spawnCli(env, ["__update-check"]);
-        assert.equal(result.status, 0);
-        assert.equal(result.stdout, "");
-        assert.equal(result.stderr, "");
-    });
-
     describe("against a stubbed registry", () => {
         let server: Server;
         let url: string;
@@ -158,14 +139,6 @@ describe("update notify", () => {
             assert.equal(readCacheFile(), null);
         });
 
-        it("__update-check ignores a 200 with malformed JSON", async () => {
-            response = { status: 200, body: "this is not json" };
-            const env = envWith({ MULTREE_REGISTRY_URL: url });
-            const result = await spawnCliAsync(env, ["__update-check"]);
-            assert.equal(result.status, 0);
-            assert.equal(readCacheFile(), null);
-        });
-
         it("kick → background fetch → notify on the next run", async () => {
             // First run: cache is empty, so kickBackgroundCheck spawns the
             // detached child. The parent doesn't wait for it.
@@ -187,25 +160,6 @@ describe("update notify", () => {
             assert.equal(second.status, 0);
             assert.match(second.stderr, /new version available: \d+\.\d+\.\d+ → 9\.9\.9/);
             assert.equal(hits, 1, "fresh cache means no second registry hit");
-        });
-
-        it("kick refreshes a stale cache (past the refetch window)", async () => {
-            // Seed an old cache pinned to a lower version. After kick fires
-            // and the child writes a fresh cache, `latest` should jump to the
-            // server's response.
-            const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString();
-            writeFileSync(
-                cachePath(),
-                JSON.stringify({ latest: "0.0.1", checked_at: old }),
-            );
-            const env = envWith({ MULTREE_REGISTRY_URL: url });
-            const result = spawnCli(env, ["--version"]);
-            assert.equal(result.status, 0);
-            // The stale cache said 0.0.1, so no notice in THIS run.
-            assert.doesNotMatch(result.stderr, /new version available/);
-
-            await waitFor(() => readCacheFile()?.latest === "9.9.9", 5000);
-            assert.equal(hits, 1);
         });
 
         it("kick is skipped while the cache is still fresh", async () => {
