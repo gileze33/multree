@@ -63,6 +63,9 @@ The repo only ships `multree.config.example.yaml`; your personal `~/multree.conf
 - `repos.<name>.consumes.upsert` — env keys to write into the new worktree's env file. Values are templated against the exposes context.
 - `repos.<name>.defaults.<key>` — fallback value when the repo isn't part of the group (e.g. point frontends at default dev port `5000` when the api isn't selected).
 - `repos.<name>.prime_artifacts` — APFS-reflink (macOS) or `--reflink=auto` (Linux) large trees like `node_modules` from the main checkout into the worktree so install reconciles instead of cold-installing.
+- `repos.<name>.update_strategy` — `rebase` or `merge`; overrides the manifest-level default for `multree update`.
+- `repos.<name>.push` — set `false` to skip this repo in `multree push`. Defaults to `true`.
+- `update_strategy` (top-level) — default strategy used by `multree update` when neither a per-repo override nor `--strategy` is given. Defaults to `merge`.
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
 
@@ -116,22 +119,31 @@ multree destroy feature-x
 ## Commands
 
 ```
-multree create <name> --include <repo,repo,...> [--branch <branch>]
+multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
 multree add <name> <repo>
 multree remove <name> <repo>
 multree list
 multree show <name>
+multree status <name> [--fetch]
+multree update <name> [--strategy rebase|merge]
+multree push <name> [--set-upstream]
 multree rewire <name>
 multree destroy <name>
 multree --version
 multree --help
 ```
 
-`create` makes a worktree per included repo, runs each `install` and `setup` hook, reads `exposes`, then upserts each `consumes` block.
+`create` makes a worktree per included repo, runs each `install` and `setup` hook, reads `exposes`, then upserts each `consumes` block. `--branch` names the new feature branch (defaults to `multree/<name>`). `--from <branch>` instead bases every member's worktree on an existing local or remote branch — useful for opening a colleague's PR locally as a group. `--from-<repo> <branch>` overrides the branch for a specific member (when branch names differ across repos).
 
 `add` brings a new repo into an existing group (worktree + setup hook on the group's branch), then re-wires the whole group so its exposes reach existing consumers.
 
 `remove` runs the repo's `teardown` hook, removes its worktree, drops it from group state, and re-wires the remainder so consumers fall back to defaults.
+
+`status` prints a per-member snapshot: current branch, ahead/behind vs `branch_base`, dirty/clean, last commit, currently exposed values, and the resolved consume targets. `--fetch` runs `git fetch` in each source repo first so the ahead/behind numbers reflect the latest remote state.
+
+`update` fetches each member's source repo, then rebases or merges that repo's `branch_base` into the member's branch. Strategy precedence: `--strategy` flag → per-repo `update_strategy` → manifest-level `update_strategy` → `merge`. Members with a dirty working tree are skipped and reported at the end. If a rebase or merge fails the operation is aborted in that worktree (no half-applied state) and the command exits non-zero.
+
+`push` pushes every member's current branch to `origin`, automatically applying `--set-upstream` on first push. Repos with `push: false` in the manifest are skipped (use for read-only mirrors). Any failed push surfaces in the summary and exits non-zero.
 
 `rewire` re-reads exposes and re-applies consumes. Use after editing the manifest or if env files drift.
 

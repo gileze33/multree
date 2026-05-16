@@ -43,6 +43,52 @@ export function lastCommitTime(worktreePath: string): Date | null {
     }
 }
 
+export interface CommitSummary {
+    hash: string;
+    subject: string;
+    time: Date | null;
+}
+
+export function lastCommitSummary(worktreePath: string): CommitSummary | null {
+    if (!existsSync(worktreePath)) {
+        return null;
+    }
+    try {
+        const out = execSync('git log -1 --format=%h%x09%cI%x09%s', {
+            cwd: worktreePath,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (!out) {
+            return null;
+        }
+        const [hash, iso, ...subjectParts] = out.split("\t");
+        return {
+            hash,
+            subject: subjectParts.join("\t"),
+            time: iso ? new Date(iso) : null,
+        };
+    } catch {
+        return null;
+    }
+}
+
+export function currentBranch(worktreePath: string): string | null {
+    if (!existsSync(worktreePath)) {
+        return null;
+    }
+    try {
+        const out = execSync("git rev-parse --abbrev-ref HEAD", {
+            cwd: worktreePath,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        return out || null;
+    } catch {
+        return null;
+    }
+}
+
 export function branchExists(repoPath: string, branch: string): boolean {
     try {
         execSync(`git show-ref --verify --quiet "refs/heads/${branch}"`, {
@@ -55,19 +101,118 @@ export function branchExists(repoPath: string, branch: string): boolean {
     }
 }
 
+export function remoteBranchExists(
+    repoPath: string,
+    remote: string,
+    branch: string,
+): boolean {
+    try {
+        execSync(`git show-ref --verify --quiet "refs/remotes/${remote}/${branch}"`, {
+            cwd: repoPath,
+            stdio: "ignore",
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function refExists(repoPath: string, ref: string): boolean {
+    try {
+        execSync(`git rev-parse --verify --quiet "${ref}^{commit}"`, {
+            cwd: repoPath,
+            stdio: ["ignore", "ignore", "ignore"],
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export interface WorktreeRecord {
+    path: string;
+    branch: string | null;
+    detached: boolean;
+}
+
+export function listWorktrees(repoPath: string): WorktreeRecord[] {
+    try {
+        const out = execSync("git worktree list --porcelain", {
+            cwd: repoPath,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+        const records: WorktreeRecord[] = [];
+        let current: Partial<WorktreeRecord> = {};
+        for (const line of out.split("\n")) {
+            if (line.startsWith("worktree ")) {
+                if (current.path) {
+                    records.push({
+                        path: current.path,
+                        branch: current.branch ?? null,
+                        detached: current.detached ?? false,
+                    });
+                }
+                current = { path: line.slice("worktree ".length) };
+            } else if (line.startsWith("branch ")) {
+                // refs/heads/<branch>
+                const ref = line.slice("branch ".length);
+                current.branch = ref.replace(/^refs\/heads\//, "");
+            } else if (line === "detached") {
+                current.detached = true;
+            }
+        }
+        if (current.path) {
+            records.push({
+                path: current.path,
+                branch: current.branch ?? null,
+                detached: current.detached ?? false,
+            });
+        }
+        return records;
+    } catch {
+        return [];
+    }
+}
+
+export function findBranchCheckout(
+    repoPath: string,
+    branch: string,
+): WorktreeRecord | null {
+    return listWorktrees(repoPath).find(w => w.branch === branch) ?? null;
+}
+
 export function addWorktree(
     repoPath: string,
     worktreePath: string,
     branch: string,
     baseRef: string,
 ): void {
-    const useExisting = branchExists(repoPath, branch);
-    const flag = useExisting ? "" : `-b "${branch}"`;
-    const target = useExisting ? `"${branch}"` : `"${worktreePath}" ${baseRef}`;
-    const cmd = useExisting
-        ? `git worktree add "${worktreePath}" ${target}`
-        : `git worktree add ${flag} "${worktreePath}" "${baseRef}"`;
-    execSync(cmd, { cwd: repoPath, stdio: "inherit" });
+    if (branchExists(repoPath, branch)) {
+        const elsewhere = findBranchCheckout(repoPath, branch);
+        if (elsewhere && elsewhere.path !== worktreePath) {
+            throw new Error(
+                `Branch "${branch}" is already checked out at ${elsewhere.path} (in ${repoPath}). ` +
+                    `Detach or remove that worktree before retrying.`,
+            );
+        }
+        execSync(`git worktree add "${worktreePath}" "${branch}"`, {
+            cwd: repoPath,
+            stdio: "inherit",
+        });
+        return;
+    }
+    if (remoteBranchExists(repoPath, "origin", branch)) {
+        execSync(
+            `git worktree add -b "${branch}" --track "${worktreePath}" "origin/${branch}"`,
+            { cwd: repoPath, stdio: "inherit" },
+        );
+        return;
+    }
+    execSync(`git worktree add -b "${branch}" "${worktreePath}" "${baseRef}"`, {
+        cwd: repoPath,
+        stdio: "inherit",
+    });
 }
 
 export function removeWorktree(repoPath: string, worktreePath: string): void {
@@ -84,4 +229,109 @@ export function removeWorktree(repoPath: string, worktreePath: string): void {
             // ignore
         }
     }
+}
+
+export interface AheadBehind {
+    ahead: number;
+    behind: number;
+}
+
+export function aheadBehind(
+    worktreePath: string,
+    baseRef: string,
+): AheadBehind | null {
+    if (!existsSync(worktreePath)) {
+        return null;
+    }
+    try {
+        const out = execSync(
+            `git rev-list --left-right --count "${baseRef}"...HEAD`,
+            {
+                cwd: worktreePath,
+                encoding: "utf-8",
+                stdio: ["ignore", "pipe", "ignore"],
+            },
+        ).trim();
+        const [behindStr, aheadStr] = out.split(/\s+/);
+        const ahead = Number(aheadStr);
+        const behind = Number(behindStr);
+        if (Number.isNaN(ahead) || Number.isNaN(behind)) {
+            return null;
+        }
+        return { ahead, behind };
+    } catch {
+        return null;
+    }
+}
+
+export function hasUpstream(worktreePath: string): boolean {
+    try {
+        execSync("git rev-parse --abbrev-ref --symbolic-full-name @{upstream}", {
+            cwd: worktreePath,
+            stdio: ["ignore", "ignore", "ignore"],
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export interface RebaseResult {
+    ok: boolean;
+    output: string;
+}
+
+function runGitCapture(cwd: string, cmd: string): { ok: boolean; output: string } {
+    try {
+        const output = execSync(cmd, {
+            cwd,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        return { ok: true, output };
+    } catch (err) {
+        const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+        const out = e.stdout ? String(e.stdout) : "";
+        const errOut = e.stderr ? String(e.stderr) : "";
+        return { ok: false, output: `${out}${errOut}${out || errOut ? "" : (e.message ?? "")}` };
+    }
+}
+
+export function rebaseOnto(worktreePath: string, baseRef: string): RebaseResult {
+    const r = runGitCapture(worktreePath, `git rebase "${baseRef}"`);
+    if (!r.ok) {
+        // Best-effort abort so we don't leave the worktree mid-rebase.
+        runGitCapture(worktreePath, "git rebase --abort");
+    }
+    return r;
+}
+
+export function mergeFrom(worktreePath: string, baseRef: string): RebaseResult {
+    const r = runGitCapture(
+        worktreePath,
+        `git merge --no-edit "${baseRef}"`,
+    );
+    if (!r.ok) {
+        runGitCapture(worktreePath, "git merge --abort");
+    }
+    return r;
+}
+
+export interface PushOptions {
+    setUpstream?: boolean;
+    remote?: string;
+}
+
+export function pushBranch(
+    worktreePath: string,
+    branch: string,
+    opts: PushOptions = {},
+): RebaseResult {
+    const remote = opts.remote ?? "origin";
+    const upstream = opts.setUpstream || !hasUpstream(worktreePath);
+    const flag = upstream ? "--set-upstream " : "";
+    return runGitCapture(
+        worktreePath,
+        `git push ${flag}"${remote}" "${branch}"`,
+    );
 }

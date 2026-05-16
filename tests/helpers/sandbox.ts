@@ -27,6 +27,17 @@ export interface FakeRepoSpec {
     exposes?: Record<string, ExposeSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
+    // Extra branches to create in the source repo before any worktree work.
+    // Each branch is forked from `develop` and gets an extra commit so it's
+    // distinguishable in ahead/behind output.
+    branches?: string[];
+    // If true, a bare repo is created under <reposRoot>/<dirname>.git and
+    // registered as `origin` on the source repo. The initial commit (and any
+    // extra branches) are pushed up so remote-tracking refs exist.
+    withRemote?: boolean;
+    // Repo manifest overrides.
+    push?: boolean;
+    updateStrategy?: "rebase" | "merge";
 }
 
 export interface SandboxOptions {
@@ -45,6 +56,14 @@ export interface Sandbox {
     state: (group: string) => GroupState | null;
     repoPath: (key: string) => string;
     worktreePath: (group: string, key: string) => string;
+    // Add a commit on `develop` in the named source repo. Useful for tests
+    // that need the base branch to be ahead of the worktree.
+    advanceDevelop: (key: string, marker?: string) => void;
+    // Run a git command in the source repo (under `develop` by default).
+    gitInRepo: (key: string, cmd: string) => string;
+    // Read a file from the bare remote (only valid for repos created with
+    // withRemote: true). Returns null if the file isn't present on origin.
+    remoteHasBranch: (key: string, branch: string) => boolean;
 }
 
 const TRACE_VAR = "MULTREE_TEST_LOG";
@@ -53,7 +72,11 @@ function git(cwd: string, cmd: string): void {
     execSync(`git ${cmd}`, { cwd, stdio: "pipe" });
 }
 
-function initFakeRepo(repoDir: string, spec: FakeRepoSpec): void {
+function gitOut(cwd: string, cmd: string): string {
+    return execSync(`git ${cmd}`, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): void {
     mkdirSync(repoDir, { recursive: true });
     if (spec.files) {
         for (const [rel, content] of Object.entries(spec.files)) {
@@ -63,8 +86,38 @@ function initFakeRepo(repoDir: string, spec: FakeRepoSpec): void {
         }
     }
     git(repoDir, "init -q -b develop");
-    git(repoDir, `-c user.email=t@t -c user.name=t add -A`);
-    git(repoDir, `-c user.email=t@t -c user.name=t commit -q --allow-empty -m initial`);
+    // Local config: identity + disable signing so sandbox repos don't try to
+    // contact any system-level signing program.
+    git(repoDir, "config user.email t@t");
+    git(repoDir, "config user.name t");
+    git(repoDir, "config commit.gpgsign false");
+    git(repoDir, "config tag.gpgsign false");
+    git(repoDir, "add -A");
+    git(repoDir, "commit -q --allow-empty -m initial");
+
+    if (spec.branches && spec.branches.length > 0) {
+        for (const branch of spec.branches) {
+            // Create branch from develop with one extra commit so it's
+            // distinguishable in ahead/behind output.
+            git(repoDir, `checkout -q -b "${branch}" develop`);
+            writeFileSync(join(repoDir, `${branch}.marker`), `${branch}\n`);
+            git(repoDir, "add -A");
+            git(repoDir, `commit -q -m "seed ${branch}"`);
+        }
+        git(repoDir, "checkout -q develop");
+    }
+
+    if (spec.withRemote) {
+        const remoteDir = join(reposRoot, `${spec.dirname ?? spec.key}.git`);
+        execSync(`git init -q --bare "${remoteDir}"`, { stdio: "pipe" });
+        git(repoDir, `remote add origin "${remoteDir}"`);
+        git(repoDir, "push -q origin develop");
+        for (const branch of spec.branches ?? []) {
+            git(repoDir, `push -q origin "${branch}"`);
+        }
+        // Mirror remote-tracking refs so branchExists/remoteBranchExists work.
+        git(repoDir, "fetch -q origin");
+    }
 }
 
 export function createSandbox(opts: SandboxOptions): Sandbox {
@@ -81,7 +134,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
     for (const spec of opts.repos) {
         const dirname = spec.dirname ?? spec.key;
         const repoDir = join(reposRoot, dirname);
-        initFakeRepo(repoDir, spec);
+        initFakeRepo(repoDir, spec, reposRoot);
 
         const hooks: NonNullable<MultreeConfig["repos"][string]["hooks"]> = {};
         if (spec.install) {
@@ -101,6 +154,8 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             exposes: spec.exposes,
             consumes: spec.consumes,
             defaults: spec.defaults,
+            push: spec.push,
+            update_strategy: spec.updateStrategy,
         };
     }
 
@@ -152,6 +207,44 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
                 throw new Error(`Unknown repo in sandbox: ${key}`);
             }
             return join(worktreeRoot, group, spec.dirname ?? spec.key);
+        },
+        advanceDevelop(key: string, marker?: string) {
+            const spec = opts.repos.find(r => r.key === key);
+            if (!spec) {
+                throw new Error(`Unknown repo in sandbox: ${key}`);
+            }
+            const repoDir = join(reposRoot, spec.dirname ?? spec.key);
+            const tag = marker ?? `advance-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+            const file = `develop-${tag}.txt`;
+            writeFileSync(join(repoDir, file), `${tag}\n`);
+            git(repoDir, "add -A");
+            git(repoDir, `commit -q -m "advance ${tag}"`);
+            if (spec.withRemote) {
+                git(repoDir, "push -q origin develop");
+            }
+        },
+        gitInRepo(key: string, cmd: string) {
+            const spec = opts.repos.find(r => r.key === key);
+            if (!spec) {
+                throw new Error(`Unknown repo in sandbox: ${key}`);
+            }
+            return gitOut(join(reposRoot, spec.dirname ?? spec.key), cmd);
+        },
+        remoteHasBranch(key: string, branch: string) {
+            const spec = opts.repos.find(r => r.key === key);
+            if (!spec || !spec.withRemote) {
+                return false;
+            }
+            const remoteDir = join(reposRoot, `${spec.dirname ?? spec.key}.git`);
+            try {
+                execSync(`git show-ref --verify --quiet "refs/heads/${branch}"`, {
+                    cwd: remoteDir,
+                    stdio: "ignore",
+                });
+                return true;
+            } catch {
+                return false;
+            }
         },
     };
 }

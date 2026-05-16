@@ -15,6 +15,10 @@ version: 1
 # <worktree_root>/<group-name>/<repo-basename>/.
 worktree_root: ~/dev/worktree
 
+# Default strategy used by `multree update` when no per-repo override and no
+# --strategy flag is given. Either "merge" (default) or "rebase".
+# update_strategy: rebase
+
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen
     # worktree. `open_in` is a preference chain -- `$root` is the group folder,
@@ -52,6 +56,11 @@ repos:
         # e.g. point frontends at the default dev port.
         defaults:
             port: 5000
+        # Override the manifest-level update_strategy for this repo. Optional.
+        # update_strategy: rebase
+        # Set to false to skip this repo in `multree push` (e.g. read-only
+        # mirror). Defaults to true.
+        # push: false
         # APFS reflink large trees (node_modules etc.) from the main checkout
         # into the worktree so install reconciles instead of cold-installing.
         prime_artifacts:

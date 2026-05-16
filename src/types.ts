@@ -26,6 +26,8 @@ export interface PrimeArtifactSpec {
     strategy?: PrimeStrategy; // default: "copy"
 }
 
+export type UpdateStrategy = "rebase" | "merge";
+
 export interface RepoConfig {
     path: string;
     branch_base?: string;
@@ -40,6 +42,12 @@ export interface RepoConfig {
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     prime_artifacts?: PrimeArtifactSpec[];
+    // Strategy used by `multree update`. Falls back to manifest-level
+    // `update_strategy`, then to "merge".
+    update_strategy?: UpdateStrategy;
+    // Set false to skip this repo in `multree push` (read-only mirrors etc.).
+    // Defaults to true.
+    push?: boolean;
 }
 
 export interface ToolConfig {
@@ -55,11 +63,17 @@ export interface MultreeConfig {
     worktree_root?: string;
     repos: Record<string, RepoConfig>;
     tools?: Record<string, ToolConfig>;
+    // Manifest-level default for `multree update`. Per-repo `update_strategy`
+    // overrides this. If neither is set, "merge" wins.
+    update_strategy?: UpdateStrategy;
 }
 
 export interface MemberState {
     repo: string;
     path: string;
+    // Branch this member's worktree is on. Older state files predate this
+    // field; consumers fall back to GroupState.branch when it's absent.
+    branch?: string;
     exposes: Record<string, string>;
 }
 

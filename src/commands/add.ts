@@ -33,12 +33,18 @@ export async function addCommand(groupName: string, repoName: string): Promise<v
     console.log(`[${repoName}] git fetch`);
     fetchRepo(repoPath);
 
-    console.log(`[${repoName}] creating worktree at ${worktreePath}`);
-    addWorktree(repoPath, worktreePath, group.branch, resolveBranchBase(repoCfg));
+    const repoBranch = group.branch;
+    console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
+    addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
 
     // Persist the new member before hooks run so destroy can recover the
     // worktree even if a hook throws.
-    group.members[repoName] = { repo: repoName, path: worktreePath, exposes: {} };
+    group.members[repoName] = {
+        repo: repoName,
+        path: worktreePath,
+        branch: repoBranch,
+        exposes: {},
+    };
     saveGroup(config, group);
 
     if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {

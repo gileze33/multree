@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { parse } from "yaml";
-import type { MultreeConfig } from "./types.ts";
+import type { MultreeConfig, RepoConfig, UpdateStrategy } from "./types.ts";
 
 const HOME_CONFIG_PATH = join(homedir(), "multree.config.yaml");
 
@@ -49,4 +49,15 @@ export function expandPath(p: string): string {
 
 export function resolveBranchBase(repoCfg: { branch_base?: string }): string {
     return repoCfg.branch_base ?? "origin/main";
+}
+
+export function resolveUpdateStrategy(
+    cfg: MultreeConfig,
+    repoCfg: RepoConfig,
+): UpdateStrategy {
+    return repoCfg.update_strategy ?? cfg.update_strategy ?? "merge";
+}
+
+export function canPush(repoCfg: RepoConfig): boolean {
+    return repoCfg.push !== false;
 }

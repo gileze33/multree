@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "fs";
 import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
-import { addWorktree, fetchRepo } from "../git.ts";
+import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
 import { normalizeHook, runHook } from "../hooks.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import type { GroupState } from "../types.ts";
@@ -12,6 +12,13 @@ interface CreateArgs {
     name: string;
     include: string[];
     branch?: string;
+    // When set, base each member's worktree on this existing branch instead
+    // of cutting a fresh `multree/<group>` branch. The branch is expected to
+    // already exist locally or on the remote (we'll fetch first).
+    from?: string;
+    // Per-repo override of the branch used for that member's worktree. Used
+    // when branch names differ across repos for the same logical work.
+    branchesByRepo?: Record<string, string>;
 }
 
 export async function createCommand(args: CreateArgs): Promise<void> {
@@ -28,8 +35,18 @@ export async function createCommand(args: CreateArgs): Promise<void> {
             );
         }
     }
+    for (const repo of Object.keys(args.branchesByRepo ?? {})) {
+        if (!args.include.includes(repo)) {
+            throw new Error(
+                `--from-${repo} given but "${repo}" is not in --include`,
+            );
+        }
+    }
+    if (args.from && args.branch) {
+        throw new Error("--from and --branch are mutually exclusive");
+    }
 
-    const branch = args.branch ?? `multree/${args.name}`;
+    const defaultBranch = args.from ?? args.branch ?? `multree/${args.name}`;
     const dir = groupDir(config, args.name);
     if (existsSync(dir)) {
         throw new Error(`Group directory already exists: ${dir}`);
@@ -38,7 +55,7 @@ export async function createCommand(args: CreateArgs): Promise<void> {
 
     const group: GroupState = {
         name: args.name,
-        branch,
+        branch: defaultBranch,
         created_at: new Date().toISOString(),
         members: {},
     };
@@ -52,14 +69,35 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         const repoCfg = config.repos[repoName];
         const repoPath = expandPath(repoCfg.path);
         const worktreePath = join(dir, basename(repoPath));
+        const repoBranch = args.branchesByRepo?.[repoName] ?? defaultBranch;
 
         console.log(`\n[${repoName}] git fetch`);
         fetchRepo(repoPath);
 
-        console.log(`[${repoName}] creating worktree at ${worktreePath}`);
-        addWorktree(repoPath, worktreePath, branch, resolveBranchBase(repoCfg));
+        // When the user said --from (or --from-<repo>), the branch must
+        // already exist somewhere — otherwise we'd silently create it from
+        // baseRef, which is the opposite of what the flag promises.
+        const fromBranchRequested = args.from !== undefined
+            || args.branchesByRepo?.[repoName] !== undefined;
+        if (
+            fromBranchRequested
+            && !branchExists(repoPath, repoBranch)
+            && !remoteBranchExists(repoPath, "origin", repoBranch)
+        ) {
+            throw new Error(
+                `[${repoName}] --from branch "${repoBranch}" not found locally or on origin in ${repoPath}`,
+            );
+        }
 
-        group.members[repoName] = { repo: repoName, path: worktreePath, exposes: {} };
+        console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
+        addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
+
+        group.members[repoName] = {
+            repo: repoName,
+            path: worktreePath,
+            branch: repoBranch,
+            exposes: {},
+        };
         saveGroup(config, group);
 
         if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
@@ -90,10 +128,11 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     wireGroup(config, group);
     saveGroup(config, group);
 
-    console.log(`\n✓ Group "${args.name}" created on branch "${branch}"`);
+    console.log(`\n✓ Group "${args.name}" created on branch "${defaultBranch}"`);
     console.log(`  Group dir: ${dir}`);
     for (const [repoName, member] of Object.entries(group.members)) {
-        console.log(`  ${repoName}: ${member.path}`);
+        const tag = member.branch && member.branch !== defaultBranch ? ` (${member.branch})` : "";
+        console.log(`  ${repoName}: ${member.path}${tag}`);
         for (const [k, v] of Object.entries(member.exposes)) {
             console.log(`    exposed ${k}=${v}`);
         }
