@@ -1,9 +1,15 @@
 import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
-import { normalizeHook, runHook } from "../hooks.ts";
+import {
+    HookFailureError,
+    HookTimeoutError,
+    normalizeHook,
+    resolveHookTimeout,
+    runHook,
+} from "../hooks.ts";
 import { deleteGroupDir, loadGroup } from "../state.ts";
 
-export function destroyCommand(name: string): void {
+export async function destroyCommand(name: string): Promise<void> {
     const { config } = loadConfig();
     const group = loadGroup(config, name);
     if (!group) {
@@ -22,9 +28,14 @@ export function destroyCommand(name: string): void {
             try {
                 console.log(`[${repoName}] teardown hook`);
                 const cwd = teardownHook.cwd === "repo" ? expandPath(repoCfg.path) : member.path;
-                runHook(teardownHook.command, cwd);
+                const timeoutMs = resolveHookTimeout(teardownHook, repoCfg, config);
+                await runHook(teardownHook.command, cwd, { timeoutMs, verbose: true, label: repoName });
             } catch (err) {
-                console.error(`[${repoName}] teardown failed: ${err instanceof Error ? err.message : err}`);
+                if (err instanceof HookFailureError || err instanceof HookTimeoutError) {
+                    console.error(`[${repoName}] teardown failed: ${err.message}`);
+                } else {
+                    console.error(`[${repoName}] teardown failed: ${err instanceof Error ? err.message : err}`);
+                }
             }
         }
 
