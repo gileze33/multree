@@ -56,11 +56,22 @@ The version printed should still be the *current* version at this point (the bum
 
 ## Bump, commit, tag, push
 
+Preview the changelog entry that will be generated, so you can sanity-check what'll be written:
+
+```
+pnpm changelog
+git diff CHANGELOG.md
+```
+
+`pnpm changelog` runs `auto-changelog` (no `-p`), which renders pending commits under an `Unreleased` heading. Revert the file with `git checkout -- CHANGELOG.md` afterwards if it looks wrong — you don't want a half-baked preview leaking into the release commit.
+
+Then run:
+
 ```
 pnpm version <patch|minor|major>
 ```
 
-`pnpm version` bumps `package.json`, commits as `vX.Y.Z`, and creates a matching git tag. No extra `git add` or `git commit` needed.
+`pnpm version` bumps `package.json`, runs the `version` lifecycle script (which regenerates `CHANGELOG.md` with `auto-changelog -p` so the `Unreleased` section is relabelled to the new version, and stages the file), commits as `vX.Y.Z` with both files, and creates a matching git tag. No extra `git add` or `git commit` needed.
 
 Push the commit and the tag together:
 
@@ -106,7 +117,7 @@ End with a short summary: the new version, the workflow run URL, and the npm pac
 
 ## What this skill does not do
 
-- It does not generate a CHANGELOG — multree doesn't keep one. If you want one later, layer `release-please` on top.
-- It does not write release notes. The user can do this on the GitHub Release page if they want; the tag is enough for npm.
+- It does not write release notes. The user can do this on the GitHub Release page if they want; the `CHANGELOG.md` and tag are enough for npm consumers.
 - It does not amend, rebase, or force-push. Releases are append-only.
 - It does not auto-resolve preconditions. If `main` is dirty or out of date, stop and surface it.
+- It does not hand-edit `CHANGELOG.md`. The file is regenerated from git history by `auto-changelog` — if an entry looks wrong, fix the underlying commit/PR title and regenerate, don't tweak the markdown.
