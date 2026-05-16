@@ -1,9 +1,19 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    unlinkSync,
+    writeFileSync,
+} from "fs";
 import { join } from "path";
 import { expandPath } from "./config.ts";
 import type { GroupState, MultreeConfig } from "./types.ts";
 
 const STATE_FILENAME = ".multree.json";
+const TMP_SUFFIX = ".tmp";
 
 function worktreeRoot(config: MultreeConfig): string {
     return expandPath(config.worktree_root ?? "~/dev/worktree");
@@ -16,18 +26,37 @@ export function groupDir(config: MultreeConfig, name: string): string {
     return join(worktreeRoot(config), name);
 }
 
+// Atomic write: stage to a sibling .tmp then rename over the canonical name.
+// rename(2) is atomic on POSIX within the same filesystem, so a crash mid-
+// write leaves either the previous committed state or the new one — never a
+// truncated `.multree.json` for `--resume` to choke on.
 export function saveGroup(config: MultreeConfig, group: GroupState): void {
     const dir = groupDir(config, group.name);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, STATE_FILENAME), JSON.stringify(group, null, 2));
+    const real = join(dir, STATE_FILENAME);
+    const tmp = real + TMP_SUFFIX;
+    writeFileSync(tmp, JSON.stringify(group, null, 2));
+    renameSync(tmp, real);
 }
 
 export function loadGroup(config: MultreeConfig, name: string): GroupState | null {
-    const path = join(groupDir(config, name), STATE_FILENAME);
-    if (!existsSync(path)) {
+    const dir = groupDir(config, name);
+    const real = join(dir, STATE_FILENAME);
+    // A stray .tmp is never authoritative: the atomic rename didn't happen,
+    // so the canonical file (if any) holds the last committed state. Clean
+    // it up on read so resume runs against a tidy directory.
+    const tmp = real + TMP_SUFFIX;
+    if (existsSync(tmp)) {
+        try {
+            unlinkSync(tmp);
+        } catch {
+            // best effort
+        }
+    }
+    if (!existsSync(real)) {
         return null;
     }
-    return JSON.parse(readFileSync(path, "utf-8")) as GroupState;
+    return JSON.parse(readFileSync(real, "utf-8")) as GroupState;
 }
 
 export function listGroups(config: MultreeConfig): GroupState[] {

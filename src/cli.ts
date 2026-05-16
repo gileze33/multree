@@ -195,7 +195,7 @@ async function main(): Promise<void> {
                 if (!name || !repo) {
                     throw new Error("remove requires <group-name> <repo>");
                 }
-                removeCommand(name, repo);
+                await removeCommand(name, repo);
                 break;
             }
             case "list":

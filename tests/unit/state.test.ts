@@ -109,6 +109,55 @@ describe("listGroups", () => {
     });
 });
 
+describe("saveGroup atomicity", () => {
+    let root: string;
+    beforeEach(() => {
+        root = mkdtempSync(join(tmpdir(), "multree-state-"));
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it("leaves no .multree.json.tmp behind after a successful save", () => {
+        const cfg = makeConfig(root);
+        saveGroup(cfg, makeState("g", "2026-05-16T10:00:00Z"));
+        assert.equal(existsSync(join(root, "g", ".multree.json.tmp")), false);
+        assert.equal(existsSync(join(root, "g", ".multree.json")), true);
+    });
+
+    it("overwrites a stale .multree.json.tmp left from a prior crashed save", () => {
+        const cfg = makeConfig(root);
+        mkdirSync(join(root, "g"), { recursive: true });
+        // Plant garbage as if a previous run died mid-write.
+        writeFileSync(join(root, "g", ".multree.json.tmp"), "{garbage");
+        saveGroup(cfg, makeState("g", "2026-05-16T10:00:00Z"));
+        assert.equal(existsSync(join(root, "g", ".multree.json.tmp")), false);
+        const loaded = loadGroup(cfg, "g");
+        assert.equal(loaded?.name, "g");
+    });
+
+    it("loadGroup discards an orphan .multree.json.tmp when canonical state exists", () => {
+        // Simulates a crash after writeFileSync(tmp) but before rename — the
+        // canonical file is still the previous committed state and resume
+        // must run against it, not the half-written tmp.
+        const cfg = makeConfig(root);
+        saveGroup(cfg, makeState("g", "2026-05-16T10:00:00Z"));
+        writeFileSync(join(root, "g", ".multree.json.tmp"), '{"partial": true}');
+        const loaded = loadGroup(cfg, "g");
+        assert.equal(loaded?.name, "g");
+        assert.equal(existsSync(join(root, "g", ".multree.json.tmp")), false);
+    });
+
+    it("loadGroup discards an orphan .multree.json.tmp when canonical state is missing", () => {
+        // A crash before the first successful rename: canonical file never
+        // existed; tmp is junk. loadGroup must return null and clean up.
+        const cfg = makeConfig(root);
+        mkdirSync(join(root, "g"), { recursive: true });
+        writeFileSync(join(root, "g", ".multree.json.tmp"), '{"partial": true}');
+        const loaded = loadGroup(cfg, "g");
+        assert.equal(loaded, null);
+        assert.equal(existsSync(join(root, "g", ".multree.json.tmp")), false);
+    });
+});
+
 describe("deleteGroupDir", () => {
     let root: string;
     beforeEach(() => {

@@ -1,5 +1,5 @@
 import { cpSync, existsSync } from "fs";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { join } from "path";
 import type { PrimeArtifactSpec, PrimeStrategy } from "./types.ts";
 
@@ -34,8 +34,9 @@ function resolveSources(repoPath: string, spec: PrimeArtifactSpec): string[] {
     }
     if (spec.find) {
         try {
-            const out = execSync(
-                `find . -name "${spec.find}" -type d -prune -not -path "*/.git/*"`,
+            const out = execFileSync(
+                "find",
+                [".", "-name", spec.find, "-type", "d", "-prune", "-not", "-path", "*/.git/*"],
                 { cwd: repoPath, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
             );
             return out.split("\n").filter(Boolean).map(m => m.replace(/^\.\//, ""));
@@ -53,7 +54,7 @@ function primeOne(src: string, dst: string, strategy: PrimeStrategy): boolean {
                 return true;
             }
             try {
-                execSync(`cp -cR "${src}" "${dst}"`, { stdio: "pipe" });
+                execFileSync("cp", ["-cR", src, dst], { stdio: "pipe" });
                 return true;
             } catch {
                 // fall through to portable copy
@@ -62,7 +63,7 @@ function primeOne(src: string, dst: string, strategy: PrimeStrategy): boolean {
             // GNU cp supports --reflink=auto on btrfs/xfs/bcachefs; falls back
             // to a regular copy on filesystems that don't support reflinks.
             try {
-                execSync(`cp --reflink=auto -R "${src}" "${dst}"`, { stdio: "pipe" });
+                execFileSync("cp", ["--reflink=auto", "-R", src, dst], { stdio: "pipe" });
                 return true;
             } catch {
                 // fall through to portable copy
