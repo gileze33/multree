@@ -1,0 +1,87 @@
+# multree example manifest.
+#
+# Copy this file to ~/multree.config.yaml (or anywhere else and point
+# $MULTREE_CONFIG at it). Edit it to describe your own repos.
+#
+# multree reads the manifest from, in order:
+#   1. $MULTREE_CONFIG (if set)
+#   2. ~/multree.config.yaml
+#
+# Once your manifest is in place: `multree create <group> --include <repo,...>`.
+
+version: 1
+
+# Parent directory for every group. Each group becomes
+# <worktree_root>/<group-name>/<repo-basename>/.
+worktree_root: ~/dev/worktree
+
+tools:
+    # `multree <tool> <group>` runs the configured command inside the chosen
+    # worktree. `open_in` is a preference chain -- `$root` is the group folder,
+    # anything else is a repo key; first non-null wins.
+    code:
+        command: ["code", "{cwd}"]
+        open_in: $root
+    # Example: open Claude Code in the api worktree, falling back to the root.
+    # claude:
+    #     command: claude
+    #     open_in: [api, $root]
+
+repos:
+    # Pick any short, stable key. Used on the CLI: `--include api,frontend`.
+    api:
+        # Absolute path (with ~/ expansion) to the main checkout.
+        path: ~/dev/repo-a
+        # Ref to fork new worktrees from. Defaults to origin/main.
+        # branch_base: origin/develop
+        hooks:
+            # Runs in the new worktree after `prime_artifacts`. Optional.
+            install: "pnpm install"
+            # Runs after install. Optional. Use this to set up DB / pick ports / etc.
+            setup: "pnpm worktree setup"
+            # Runs on remove/destroy. Optional.
+            teardown: "pnpm worktree teardown"
+        # Read values from this worktree's env file after setup; other repos
+        # reference them as {<repo>.<key>} in their consumes block.
+        exposes:
+            port:
+                type: env_file
+                file: .env.local
+                key: server__port
+        # Fallback values used when this repo is NOT included in the group --
+        # e.g. point frontends at the default dev port.
+        defaults:
+            port: 5000
+        # APFS reflink large trees (node_modules etc.) from the main checkout
+        # into the worktree so install reconciles instead of cold-installing.
+        prime_artifacts:
+            - find: node_modules
+              strategy: reflink
+
+    frontend:
+        path: ~/dev/repo-b
+        hooks:
+            install: "pnpm install"
+        # Write templated env vars into the worktree's env file, inside a block
+        # bracketed by `# >>> multree-managed: <group> >>>` / `# <<< ... <<<`
+        # so `rewire` is idempotent.
+        consumes:
+            file: .env.local
+            upsert:
+                API_URL: "http://localhost:{api.port}"
+        prime_artifacts:
+            - find: node_modules
+              strategy: reflink
+
+    # `consumes` can also be an array, for a monorepo with several env files:
+    # web:
+    #     path: ~/dev/repo-c
+    #     hooks:
+    #         install: "yarn install"
+    #     consumes:
+    #         - file: packages/app-one/.env
+    #           upsert:
+    #               REACT_APP_API_URL: "http://localhost:{api.port}"
+    #         - file: packages/app-two/.env
+    #           upsert:
+    #               REACT_APP_API_URL: "http://localhost:{api.port}"

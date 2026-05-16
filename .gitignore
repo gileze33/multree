@@ -1,0 +1,7 @@
+node_modules/
+.DS_Store
+*.log
+
+# A local multree.config.yaml in the repo root is a developer's personal copy
+# of the example -- never commit it. The example lives at multree.config.example.yaml.
+/multree.config.yaml
