@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { parse } from "yaml";
-import type { MultreeConfig } from "./types.ts";
+import type {
+    MainCheckoutAction,
+    MultreeConfig,
+    RepoConfig,
+    UpdateStrategy,
+} from "./types.ts";
 
 const HOME_CONFIG_PATH = join(homedir(), "multree.config.yaml");
 
@@ -49,4 +54,33 @@ export function expandPath(p: string): string {
 
 export function resolveBranchBase(repoCfg: { branch_base?: string }): string {
     return repoCfg.branch_base ?? "origin/main";
+}
+
+export function resolveUpdateStrategy(
+    cfg: MultreeConfig,
+    repoCfg: RepoConfig,
+): UpdateStrategy {
+    return repoCfg.update_strategy ?? cfg.update_strategy ?? "rebase";
+}
+
+export function canPush(repoCfg: RepoConfig): boolean {
+    return repoCfg.push !== false;
+}
+
+export function resolveMainCheckoutAction(
+    cfg: MultreeConfig,
+    repoCfg: RepoConfig,
+): MainCheckoutAction {
+    return repoCfg.main_checkout_action ?? cfg.main_checkout_action ?? "switch";
+}
+
+// Local branch name implied by a `branch_base` like "origin/develop" or
+// just "develop". Used as the default destination when we have to free a
+// branch from the main checkout via "switch".
+export function defaultBranchFromBase(repoCfg: RepoConfig): string {
+    const base = repoCfg.branch_base ?? "origin/main";
+    // Strip the leading remote name segment (everything up to and including
+    // the first slash) if present, otherwise return as-is.
+    const slash = base.indexOf("/");
+    return slash === -1 ? base : base.slice(slash + 1);
 }

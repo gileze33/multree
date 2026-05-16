@@ -15,6 +15,16 @@ version: 1
 # <worktree_root>/<group-name>/<repo-basename>/.
 worktree_root: ~/dev/worktree
 
+# Default strategy used by `multree update` when no per-repo override and no
+# --strategy flag is given. Either "rebase" (default) or "merge".
+# update_strategy: merge
+
+# What to do when a target branch is already checked out in a repo's main
+# source: "switch" (default) moves the main checkout onto its branch_base
+# (with leading "origin/" stripped), "detach" leaves it on a detached HEAD,
+# "error" refuses to act. Per-repo overrides allowed.
+# main_checkout_action: detach
+
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen
     # worktree. `open_in` is a preference chain -- `$root` is the group folder,
@@ -52,6 +62,11 @@ repos:
         # e.g. point frontends at the default dev port.
         defaults:
             port: 5000
+        # Override the manifest-level update_strategy for this repo. Optional.
+        # update_strategy: rebase
+        # Set to false to skip this repo in `multree push` (e.g. read-only
+        # mirror). Defaults to true.
+        # push: false
         # APFS reflink large trees (node_modules etc.) from the main checkout
         # into the worktree so install reconciles instead of cold-installing.
         prime_artifacts:

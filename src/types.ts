@@ -26,6 +26,17 @@ export interface PrimeArtifactSpec {
     strategy?: PrimeStrategy; // default: "copy"
 }
 
+export type UpdateStrategy = "rebase" | "merge";
+
+// What to do when multree needs to check out a branch that's currently held
+// by the source repo's MAIN checkout (i.e. not another multree worktree).
+//   - "switch":  switch the main checkout to its branch_base (with any
+//                `origin/` prefix stripped) before taking the branch.
+//   - "detach":  detach the main checkout's HEAD on the current commit.
+//   - "error":   refuse to act on the main checkout; surface an error.
+// Default is "switch".
+export type MainCheckoutAction = "switch" | "detach" | "error";
+
 export interface RepoConfig {
     path: string;
     branch_base?: string;
@@ -40,6 +51,16 @@ export interface RepoConfig {
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     prime_artifacts?: PrimeArtifactSpec[];
+    // Strategy used by `multree update`. Falls back to manifest-level
+    // `update_strategy`, then to "rebase".
+    update_strategy?: UpdateStrategy;
+    // Set false to skip this repo in `multree push` (read-only mirrors etc.).
+    // Defaults to true.
+    push?: boolean;
+    // Per-repo override of how to free a branch when the main checkout is
+    // holding it. Falls back to manifest-level `main_checkout_action`, then
+    // to "switch".
+    main_checkout_action?: MainCheckoutAction;
 }
 
 export interface ToolConfig {
@@ -55,11 +76,21 @@ export interface MultreeConfig {
     worktree_root?: string;
     repos: Record<string, RepoConfig>;
     tools?: Record<string, ToolConfig>;
+    // Manifest-level default for `multree update`. Per-repo `update_strategy`
+    // overrides this. If neither is set, "rebase" wins.
+    update_strategy?: UpdateStrategy;
+    // Manifest-level default for what to do when a target branch is already
+    // checked out in a repo's main source. Per-repo overrides win; if neither
+    // is set, "switch" wins.
+    main_checkout_action?: MainCheckoutAction;
 }
 
 export interface MemberState {
     repo: string;
     path: string;
+    // Branch this member's worktree is on. Older state files predate this
+    // field; consumers fall back to GroupState.branch when it's absent.
+    branch?: string;
     exposes: Record<string, string>;
 }
 
