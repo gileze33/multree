@@ -7,7 +7,8 @@ Multi-repo `git worktree` group orchestrator. Creates linked worktrees across N 
 - **Package manager: pnpm.** This is a pnpm workspace (`pnpm-workspace.yaml`, `pnpm-lock.yaml`).
 - **Never use `npx` in this repo.** Not for installs, not for running binaries, not for one-off scripts. If a binary needs running, invoke it via the local `node_modules/.bin/` entry, a `package.json` script (`pnpm <script>`), or `pnpm exec <bin>`. `npx` will pull a global cache, can resolve a different version than the lockfile, and bypasses the workspace — assume it is forbidden.
 - **Node**: requires `>=20.6` (see `package.json` `engines`). The `bin/multree` shim relies on `tsx` from local `node_modules/.bin`.
-- **TypeScript runner**: `tsx`. No build step — source runs directly. The CLI entry is `src/cli.ts`, invoked through `bin/multree`.
+- **TypeScript runner**: `tsx`. For dev and tests, source runs directly via `tsx` — no build step needed. The CLI entry is `src/cli.ts`, invoked through `bin/multree` (a bash shim).
+- **Build (for publish only)**: `tsdown` bundles `src/cli.ts` to `dist/cli.mjs` for the npm tarball. The published `package.json#bin` points at `dist/cli.mjs`. The bash shim in `bin/` is dev-only and not in the published `files`. See `.claude/skills/release/SKILL.md` for the release flow.
 
 ## Commands
 
@@ -15,6 +16,7 @@ Run scripts via pnpm:
 
 - `pnpm typecheck` — `tsc --noEmit` against `src/**/*.ts` and `tests/**/*.ts`.
 - `pnpm dev` — run the CLI (`tsx src/cli.ts`).
+- `pnpm build` — bundle to `dist/cli.mjs` via `tsdown`. Output is gitignored.
 - `pnpm test` — unit + integration via the built-in node test runner (`tsx --test`).
 - `pnpm test:unit` — `tests/unit/*.test.ts` only (pure modules, ~0.5s).
 - `pnpm test:integration` — `tests/integration/*.test.ts` only (spawn the real `bin/multree` against sandboxed fixture repos through `tests/helpers/cli.ts` and `sandbox.ts`; ~7s).
@@ -57,7 +59,8 @@ tests/
   integration/      # full command flows against fixture repos
   fixtures/repos/   # tiny git repos used by integration tests
   helpers/          # shared test scaffolding
-bin/multree                  # bash shim that execs tsx on src/cli.ts
+bin/multree                  # bash shim that execs tsx on src/cli.ts (dev only; not published)
+tsdown.config.ts             # bundler config for `pnpm build` -> dist/cli.mjs (publish only)
 multree.config.example.yaml  # committed example manifest; user copies it to ~/multree.config.yaml
 ```
 

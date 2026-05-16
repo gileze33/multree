@@ -16,6 +16,17 @@ Tested on macOS (where reflinks use APFS `clonefile`) and Linux (where reflinks 
 
 ## Install
 
+From npm (recommended):
+
+```bash
+npm i -g multree-cli
+multree --help
+```
+
+Requires Node 20.6+.
+
+From source (for contributors):
+
 ```bash
 git clone https://github.com/gileze33/multree.git
 cd multree

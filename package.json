@@ -1,5 +1,5 @@
 {
-    "name": "multree",
+    "name": "multree-cli",
     "version": "0.1.0",
     "description": "Multi-repo git worktree group orchestrator: spin up linked worktrees across N repos, run per-repo hooks, prime heavy artifacts via APFS reflinks, and wire consumer env files to values exposed by producer repos.",
     "type": "module",
@@ -24,11 +24,10 @@
         "apfs"
     ],
     "bin": {
-        "multree": "./bin/multree"
+        "multree": "./dist/cli.mjs"
     },
     "files": [
-        "bin",
-        "src",
+        "dist",
         "multree.config.example.yaml",
         "README.md",
         "LICENSE"
@@ -38,18 +37,21 @@
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "dev": "tsx src/cli.ts",
+        "build": "tsdown",
         "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
         "test:unit": "tsx --test tests/unit/*.test.ts",
-        "test:integration": "tsx --test tests/integration/*.test.ts"
+        "test:integration": "tsx --test tests/integration/*.test.ts",
+        "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
     },
     "dependencies": {
-        "tsx": "^4.19.2",
         "yaml": "^2.6.0"
     },
     "devDependencies": {
         "@types/node": "^22.10.0",
         "@typescript-eslint/parser": "^8.55.0",
         "eslint": "^9.0.0",
+        "tsdown": "^0.22.0",
+        "tsx": "^4.19.2",
         "typescript": "^5.6.3"
     },
     "engines": {
