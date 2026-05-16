@@ -11,7 +11,7 @@ This skill drives a clean release: pick a semver bump, run pre-publish checks, t
 
 Before doing anything, verify all of:
 
-1. Working directory is the multree repo root (look for `package.json` with `"name": "multree"`).
+1. Working directory is the multree repo root (look for `package.json` with `"name": "multree-cli"` — the npm package name is `multree-cli` because `multree` is too close to `multer`; the CLI command users invoke is still `multree`).
 2. Current branch is `main`.
 3. Working tree is clean (`git status --porcelain` is empty).
 4. Local `main` is up to date with `origin/main` (`git fetch && git rev-parse HEAD == origin/main`).
@@ -102,13 +102,13 @@ If the workflow fails, fetch the logs (`gh run view --log-failed`) and report th
 Once the workflow succeeds, confirm the new version is live:
 
 ```
-npm view multree version
+npm view multree-cli version
 ```
 
 Should match the just-released `X.Y.Z`. Optionally check provenance:
 
 ```
-npm view multree --json | jq '.dist.attestations'
+npm view multree-cli --json | jq '.dist.attestations'
 ```
 
 ## Report to the user
