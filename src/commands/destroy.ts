@@ -6,7 +6,9 @@ import { deleteGroupDir, loadGroup } from "../state.ts";
 export function destroyCommand(name: string): void {
     const { config } = loadConfig();
     const group = loadGroup(config, name);
-    if (!group) throw new Error(`Group not found: ${name}`);
+    if (!group) {
+        throw new Error(`Group not found: ${name}`);
+    }
 
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];

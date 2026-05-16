@@ -7,7 +7,9 @@ import { wireGroup } from "../wiring.ts";
 export function removeCommand(groupName: string, repoName: string): void {
     const { config } = loadConfig();
     const group = loadGroup(config, groupName);
-    if (!group) throw new Error(`Group not found: ${groupName}`);
+    if (!group) {
+        throw new Error(`Group not found: ${groupName}`);
+    }
 
     const member = group.members[repoName];
     if (!member) {

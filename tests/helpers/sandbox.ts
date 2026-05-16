@@ -84,9 +84,15 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         initFakeRepo(repoDir, spec);
 
         const hooks: NonNullable<MultreeConfig["repos"][string]["hooks"]> = {};
-        if (spec.install) hooks.install = spec.install;
-        if (spec.setup) hooks.setup = spec.setup;
-        if (spec.teardown) hooks.teardown = spec.teardown;
+        if (spec.install) {
+            hooks.install = spec.install;
+        }
+        if (spec.setup) {
+            hooks.setup = spec.setup;
+        }
+        if (spec.teardown) {
+            hooks.teardown = spec.teardown;
+        }
 
         repos[spec.key] = {
             path: repoDir,
@@ -128,17 +134,23 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         },
         state(group: string) {
             const p = join(worktreeRoot, group, ".multree.json");
-            if (!existsSync(p)) return null;
+            if (!existsSync(p)) {
+                return null;
+            }
             return JSON.parse(readFileSync(p, "utf-8")) as GroupState;
         },
         repoPath(key: string) {
             const spec = opts.repos.find(r => r.key === key);
-            if (!spec) throw new Error(`Unknown repo in sandbox: ${key}`);
+            if (!spec) {
+                throw new Error(`Unknown repo in sandbox: ${key}`);
+            }
             return join(reposRoot, spec.dirname ?? spec.key);
         },
         worktreePath(group: string, key: string) {
             const spec = opts.repos.find(r => r.key === key);
-            if (!spec) throw new Error(`Unknown repo in sandbox: ${key}`);
+            if (!spec) {
+                throw new Error(`Unknown repo in sandbox: ${key}`);
+            }
             return join(worktreeRoot, group, spec.dirname ?? spec.key);
         },
     };

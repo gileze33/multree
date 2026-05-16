@@ -2,8 +2,12 @@ import { execSync } from "child_process";
 import type { HookCmd, HookSpec } from "./types.ts";
 
 export function normalizeHook(spec: HookSpec | undefined): HookCmd | undefined {
-    if (spec === undefined) return undefined;
-    if (typeof spec === "string") return { command: spec, cwd: "worktree" };
+    if (spec === undefined) {
+        return undefined;
+    }
+    if (typeof spec === "string") {
+        return { command: spec, cwd: "worktree" };
+    }
     return spec;
 }
 

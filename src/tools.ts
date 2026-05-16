@@ -16,7 +16,9 @@ function resolveCwd(
             return groupDir(config, group.name);
         }
         const member = group.members[item];
-        if (member) return member.path;
+        if (member) {
+            return member.path;
+        }
     }
     return groupDir(config, group.name);
 }
@@ -31,7 +33,9 @@ function runShellCommand(command: string, cwd: string): void {
 }
 
 function runArgvCommand(argv: string[], cwd: string): void {
-    if (argv.length === 0) throw new Error("tool command argv is empty");
+    if (argv.length === 0) {
+        throw new Error("tool command argv is empty");
+    }
     const [bin, ...rest] = argv.map(a => substituteCwd(a, cwd));
     execFileSync(bin, rest, { cwd, stdio: "inherit" });
 }
@@ -44,10 +48,14 @@ export function isToolName(name: string): boolean {
 export function toolCommand(toolName: string, groupName: string): void {
     const { config } = loadConfig();
     const tool: ToolConfig | undefined = config.tools?.[toolName];
-    if (!tool) throw new Error(`Unknown tool: ${toolName}`);
+    if (!tool) {
+        throw new Error(`Unknown tool: ${toolName}`);
+    }
 
     const group = loadGroup(config, groupName);
-    if (!group) throw new Error(`Group not found: ${groupName}`);
+    if (!group) {
+        throw new Error(`Group not found: ${groupName}`);
+    }
 
     const cwd = resolveCwd(config, group, tool.open_in);
     console.log(`${toolName}: ${cwd}`);
@@ -60,7 +68,9 @@ export function toolCommand(toolName: string, groupName: string): void {
         }
     } catch (err) {
         const code = (err as { status?: number }).status;
-        if (typeof code === "number") process.exit(code);
+        if (typeof code === "number") {
+            process.exit(code);
+        }
         throw err;
     }
 }

@@ -10,7 +10,9 @@ import { wireGroup } from "../wiring.ts";
 export async function addCommand(groupName: string, repoName: string): Promise<void> {
     const { config } = loadConfig();
     const group = loadGroup(config, groupName);
-    if (!group) throw new Error(`Group not found: ${groupName}`);
+    if (!group) {
+        throw new Error(`Group not found: ${groupName}`);
+    }
 
     const repoCfg = config.repos[repoName];
     if (!repoCfg) {

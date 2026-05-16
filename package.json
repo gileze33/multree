@@ -1,13 +1,42 @@
 {
     "name": "multree",
     "version": "0.1.0",
-    "description": "Multi-repo git worktree group orchestrator",
+    "description": "Multi-repo git worktree group orchestrator: spin up linked worktrees across N repos, run per-repo hooks, prime heavy artifacts via APFS reflinks, and wire consumer env files to values exposed by producer repos.",
     "type": "module",
+    "license": "MIT",
+    "author": "Giles Boon-Williams",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/gileze33/multree.git"
+    },
+    "bugs": {
+        "url": "https://github.com/gileze33/multree/issues"
+    },
+    "homepage": "https://github.com/gileze33/multree#readme",
+    "keywords": [
+        "git",
+        "worktree",
+        "monorepo",
+        "polyrepo",
+        "cli",
+        "dev-tools",
+        "reflink",
+        "apfs"
+    ],
     "bin": {
         "multree": "./bin/multree"
     },
+    "files": [
+        "bin",
+        "src",
+        "multree.config.example.yaml",
+        "README.md",
+        "LICENSE"
+    ],
     "scripts": {
         "typecheck": "tsc --noEmit",
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
         "dev": "tsx src/cli.ts",
         "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
         "test:unit": "tsx --test tests/unit/*.test.ts",
@@ -19,6 +48,8 @@
     },
     "devDependencies": {
         "@types/node": "^22.10.0",
+        "@typescript-eslint/parser": "^8.55.0",
+        "eslint": "^9.0.0",
         "typescript": "^5.6.3"
     },
     "engines": {

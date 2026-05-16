@@ -6,7 +6,9 @@ export function readExposes(
     memberPath: string,
     exposes: Record<string, ExposeSpec> | undefined,
 ): Record<string, string> {
-    if (!exposes) return {};
+    if (!exposes) {
+        return {};
+    }
     const out: Record<string, string> = {};
     for (const [name, spec] of Object.entries(exposes)) {
         if (spec.type !== "env_file") {
@@ -62,7 +64,9 @@ export function applyConsumes(
     marker: string,
     context: Record<string, Record<string, string>>,
 ): void {
-    if (!consumes) return;
+    if (!consumes) {
+        return;
+    }
     const resolved: Record<string, string> = {};
     for (const [k, tmpl] of Object.entries(consumes.upsert)) {
         resolved[k] = resolveTemplate(tmpl, context);
@@ -76,7 +80,9 @@ export function clearConsumes(
     consumes: ConsumeSpec | undefined,
     marker: string,
 ): void {
-    if (!consumes) return;
+    if (!consumes) {
+        return;
+    }
     removeManagedBlock(join(memberPath, consumes.file), marker);
 }
 
@@ -98,7 +104,9 @@ export function wireGroup(config: MultreeConfig, group: GroupState): void {
     const ctx = buildContext(config, group);
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
-        if (!repoCfg?.consumes) continue;
+        if (!repoCfg?.consumes) {
+            continue;
+        }
         const specs = Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes];
         console.log(`[${repoName}] wiring env`);
         for (const spec of specs) {

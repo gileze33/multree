@@ -12,7 +12,9 @@ export function fetchRepo(repoPath: string): void {
 }
 
 export function isDirty(worktreePath: string): boolean {
-    if (!existsSync(worktreePath)) return false;
+    if (!existsSync(worktreePath)) {
+        return false;
+    }
     try {
         const out = execSync("git status --porcelain", {
             cwd: worktreePath,
@@ -26,7 +28,9 @@ export function isDirty(worktreePath: string): boolean {
 }
 
 export function lastCommitTime(worktreePath: string): Date | null {
-    if (!existsSync(worktreePath)) return null;
+    if (!existsSync(worktreePath)) {
+        return null;
+    }
     try {
         const iso = execSync("git log -1 --format=%cI", {
             cwd: worktreePath,

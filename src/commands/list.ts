@@ -4,13 +4,25 @@ import { listGroups } from "../state.ts";
 import type { GroupState } from "../types.ts";
 
 function formatRelative(date: Date | null): string {
-    if (!date) return "—";
+    if (!date) {
+        return "—";
+    }
     const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (seconds < 0) return "just now";
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 7 * 86_400) return `${Math.floor(seconds / 86_400)}d ago`;
+    if (seconds < 0) {
+        return "just now";
+    }
+    if (seconds < 60) {
+        return `${seconds}s ago`;
+    }
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}m ago`;
+    }
+    if (seconds < 86_400) {
+        return `${Math.floor(seconds / 3600)}h ago`;
+    }
+    if (seconds < 7 * 86_400) {
+        return `${Math.floor(seconds / 86_400)}d ago`;
+    }
     return date.toISOString().slice(0, 10);
 }
 
@@ -18,7 +30,9 @@ function groupLastActivity(group: GroupState): Date | null {
     let max: Date | null = null;
     for (const member of Object.values(group.members)) {
         const t = lastCommitTime(member.path);
-        if (t && (!max || t > max)) max = t;
+        if (t && (!max || t > max)) {
+            max = t;
+        }
     }
     return max ?? new Date(group.created_at);
 }

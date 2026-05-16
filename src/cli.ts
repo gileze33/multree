@@ -1,3 +1,6 @@
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { destroyCommand } from "./commands/destroy.ts";
@@ -19,7 +22,19 @@ const BUILTIN_COMMANDS = new Set([
     "help",
     "--help",
     "-h",
+    "--version",
+    "-v",
 ]);
+
+function readVersion(): string {
+    try {
+        const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: string };
+        return pkg.version ?? "0.0.0";
+    } catch {
+        return "0.0.0";
+    }
+}
 
 interface ParsedArgs {
     cmd: string;
@@ -85,25 +100,33 @@ async function main(): Promise<void> {
         switch (cmd) {
             case "create": {
                 const name = positional[0];
-                if (!name) throw new Error("create requires a group name");
+                if (!name) {
+                    throw new Error("create requires a group name");
+                }
                 if (typeof flags.include !== "string") {
                     throw new Error("create requires --include <repo,...>");
                 }
                 const include = flags.include.split(",").map(s => s.trim()).filter(Boolean);
-                if (include.length === 0) throw new Error("--include must list at least one repo");
+                if (include.length === 0) {
+                    throw new Error("--include must list at least one repo");
+                }
                 const branch = typeof flags.branch === "string" ? flags.branch : undefined;
                 await createCommand({ name, include, branch });
                 break;
             }
             case "add": {
                 const [name, repo] = positional;
-                if (!name || !repo) throw new Error("add requires <group-name> <repo>");
+                if (!name || !repo) {
+                    throw new Error("add requires <group-name> <repo>");
+                }
                 await addCommand(name, repo);
                 break;
             }
             case "remove": {
                 const [name, repo] = positional;
-                if (!name || !repo) throw new Error("remove requires <group-name> <repo>");
+                if (!name || !repo) {
+                    throw new Error("remove requires <group-name> <repo>");
+                }
                 removeCommand(name, repo);
                 break;
             }
@@ -111,21 +134,31 @@ async function main(): Promise<void> {
                 listCommand();
                 break;
             case "show":
-                if (!positional[0]) throw new Error("show requires a group name");
+                if (!positional[0]) {
+                    throw new Error("show requires a group name");
+                }
                 showCommand(positional[0]);
                 break;
             case "rewire":
-                if (!positional[0]) throw new Error("rewire requires a group name");
+                if (!positional[0]) {
+                    throw new Error("rewire requires a group name");
+                }
                 rewireCommand(positional[0]);
                 break;
             case "destroy":
-                if (!positional[0]) throw new Error("destroy requires a group name");
+                if (!positional[0]) {
+                    throw new Error("destroy requires a group name");
+                }
                 destroyCommand(positional[0]);
                 break;
             case "help":
             case "--help":
             case "-h":
                 help();
+                break;
+            case "--version":
+            case "-v":
+                console.log(readVersion());
                 break;
             default: {
                 // Fall through to tool dispatch.

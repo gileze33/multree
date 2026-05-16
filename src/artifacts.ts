@@ -48,13 +48,27 @@ function resolveSources(repoPath: string, spec: PrimeArtifactSpec): string[] {
 
 function primeOne(src: string, dst: string, strategy: PrimeStrategy): boolean {
     if (strategy === "reflink") {
-        if (clonefileDir(src, dst)) return true;
-        try {
-            execSync(`cp -cR "${src}" "${dst}"`, { stdio: "pipe" });
-            return true;
-        } catch {
-            // fall through to portable copy
+        if (process.platform === "darwin") {
+            if (clonefileDir(src, dst)) {
+                return true;
+            }
+            try {
+                execSync(`cp -cR "${src}" "${dst}"`, { stdio: "pipe" });
+                return true;
+            } catch {
+                // fall through to portable copy
+            }
+        } else if (process.platform === "linux") {
+            // GNU cp supports --reflink=auto on btrfs/xfs/bcachefs; falls back
+            // to a regular copy on filesystems that don't support reflinks.
+            try {
+                execSync(`cp --reflink=auto -R "${src}" "${dst}"`, { stdio: "pipe" });
+                return true;
+            } catch {
+                // fall through to portable copy
+            }
         }
+        // On other platforms (or after a fallback), drop through to cpSync.
     }
     try {
         cpSync(src, dst, { recursive: true, dereference: false, errorOnExist: false, force: false });
@@ -69,13 +83,19 @@ export function primeArtifacts(
     worktreePath: string,
     specs: PrimeArtifactSpec[] | undefined,
 ): void {
-    if (!specs || specs.length === 0) return;
-    if (!existsSync(repoPath)) return;
+    if (!specs || specs.length === 0) {
+        return;
+    }
+    if (!existsSync(repoPath)) {
+        return;
+    }
 
     for (const spec of specs) {
         const strategy: PrimeStrategy = spec.strategy ?? "copy";
         const sources = resolveSources(repoPath, spec);
-        if (sources.length === 0) continue;
+        if (sources.length === 0) {
+            continue;
+        }
 
         console.log(`  priming ${sources.length} path(s) via ${strategy}`);
         const totalStart = Date.now();
@@ -83,8 +103,12 @@ export function primeArtifacts(
         for (const rel of sources) {
             const src = join(repoPath, rel);
             const dst = join(worktreePath, rel);
-            if (!existsSync(src)) continue;
-            if (existsSync(dst)) continue;
+            if (!existsSync(src)) {
+                continue;
+            }
+            if (existsSync(dst)) {
+                continue;
+            }
 
             const start = Date.now();
             process.stdout.write(`    ${rel} ... `);

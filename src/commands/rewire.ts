@@ -5,7 +5,9 @@ import { wireGroup } from "../wiring.ts";
 export function rewireCommand(name: string): void {
     const { config } = loadConfig();
     const group = loadGroup(config, name);
-    if (!group) throw new Error(`Group not found: ${name}`);
+    if (!group) {
+        throw new Error(`Group not found: ${name}`);
+    }
 
     wireGroup(config, group);
     saveGroup(config, group);

@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve the real location of this script so symlinks (~/.local/bin/multree
+# or a global package manager bin) point back to the source tree.
 REAL="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "${BASH_SOURCE[0]}")"
 DIR="$(cd "$(dirname "$REAL")" && pwd)"
-exec "$DIR/../node_modules/.bin/tsx" "$DIR/../src/cli.ts" "$@"
+ROOT="$(cd "$DIR/.." && pwd)"
+CLI="$ROOT/src/cli.ts"
+
+# Resolve tsx through Node's module resolver, anchored at this package's root.
+# This works whether tsx sits at $ROOT/node_modules/tsx (local pnpm/npm install)
+# or has been hoisted higher up by a global install.
+TSX_CLI="$(node -e 'process.stdout.write(require.resolve("tsx/cli", { paths: [process.argv[1]] }))' "$ROOT" 2>/dev/null || true)"
+
+if [ -z "${TSX_CLI}" ]; then
+  echo "multree: cannot find 'tsx'. Run 'pnpm install' (or 'npm install') in $ROOT first." >&2
+  exit 1
+fi
+
+exec node "$TSX_CLI" "$CLI" "$@"

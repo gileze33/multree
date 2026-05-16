@@ -34,12 +34,16 @@ function validate(cfg: MultreeConfig): void {
         throw new Error("Config has no repos defined");
     }
     for (const [name, repo] of Object.entries(cfg.repos)) {
-        if (!repo.path) throw new Error(`Repo "${name}" is missing required field: path`);
+        if (!repo.path) {
+            throw new Error(`Repo "${name}" is missing required field: path`);
+        }
     }
 }
 
 export function expandPath(p: string): string {
-    if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+    if (p.startsWith("~/")) {
+        return join(homedir(), p.slice(2));
+    }
     return p;
 }
 
