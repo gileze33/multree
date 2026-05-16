@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 
 // All git invocations go through execFileSync with an argv array (no shell),
 // so user-controlled values like branch names and paths cannot be
@@ -24,6 +24,21 @@ function gitCapture(cwd: string, args: string[]): string {
 interface GitResult {
     ok: boolean;
     output: string;
+}
+
+// macOS surfaces tmpdirs via /var/folders which is symlinked to
+// /private/var/folders. git canonicalises through realpath, so a string
+// compare against the path we passed in misidentifies the same on-disk
+// location. Canonicalise both sides before comparing.
+function samePath(a: string, b: string): boolean {
+    if (a === b) {
+        return true;
+    }
+    try {
+        return realpathSync(a) === realpathSync(b);
+    } catch {
+        return false;
+    }
 }
 
 function gitTry(cwd: string, args: string[]): GitResult {
@@ -218,7 +233,7 @@ export function addWorktree(
 ): void {
     if (branchExists(repoPath, branch)) {
         const elsewhere = findBranchCheckout(repoPath, branch);
-        if (elsewhere && elsewhere.path !== worktreePath) {
+        if (elsewhere && !samePath(elsewhere.path, worktreePath)) {
             throw new Error(
                 `Branch "${branch}" is already checked out at ${elsewhere.path} (in ${repoPath}). ` +
                     `Detach or remove that worktree before retrying.`,
