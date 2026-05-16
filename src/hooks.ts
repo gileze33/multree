@@ -1,6 +1,8 @@
 import { spawn } from "child_process";
-import { parseDuration } from "./duration.ts";
+import { formatDuration, parseDuration } from "./duration.ts";
 import type { HookCmd, HookSpec, MultreeConfig, RepoConfig } from "./types.ts";
+
+export type MemberHookPhase = "install" | "setup" | "teardown";
 
 export function normalizeHook(spec: HookSpec | undefined): HookCmd | undefined {
     if (spec === undefined) {
@@ -58,7 +60,7 @@ export function runHook(
         const child = spawn(command, {
             cwd,
             env: process.env,
-            shell: "/bin/bash",
+            shell: "bash",
             stdio: ["ignore", "pipe", "pipe"],
         });
 
@@ -134,6 +136,62 @@ export function runHook(
             reject(new HookFailureError(code, signal, output));
         });
     });
+}
+
+export interface MemberHookArgs {
+    phase: MemberHookPhase;
+    repoName: string;
+    hook: HookCmd;
+    repoPath: string;
+    worktreePath: string;
+    repoCfg: RepoConfig;
+    config: MultreeConfig;
+    // Only consulted for install/setup; teardown always streams live so the
+    // user can see what's happening as a worktree comes down.
+    verbose?: boolean;
+}
+
+// One entry point for "run a hook attached to a member of a group". Centralises
+// cwd resolution, timeout lookup, the [<repo>] log prefix, and the post-failure
+// captured-output dump. Failure semantics differ by phase:
+//   - install/setup: rethrows on failure; callers decide what to do (create
+//     marks the member failed in state; add unwinds back to the user).
+//   - teardown:      catches HookFailureError/HookTimeoutError and logs, so
+//     `remove`/`destroy` can finish tearing the worktree down regardless.
+export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult | undefined> {
+    const { phase, repoName, hook, repoPath, worktreePath, repoCfg, config } = args;
+    const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
+    const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
+    const fatal = phase !== "teardown";
+    const verbose = phase === "teardown" ? true : (args.verbose ?? false);
+
+    console.log(`[${repoName}] ${phase} hook${timeoutMs ? ` (timeout: ${timeoutMs}ms)` : ""}`);
+    if (!verbose) {
+        console.log(`  $ (${cwd}) ${hook.command}`);
+    }
+
+    try {
+        const r = await runHook(hook.command, cwd, {
+            timeoutMs,
+            verbose,
+            label: verbose ? repoName : undefined,
+        });
+        console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
+        return r;
+    } catch (err) {
+        if (!verbose && (err instanceof HookFailureError || err instanceof HookTimeoutError) && err.output) {
+            process.stderr.write(err.output);
+            if (!err.output.endsWith("\n")) {
+                process.stderr.write("\n");
+            }
+        }
+        if (fatal) {
+            throw err;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[${repoName}] ${phase} failed: ${msg}`);
+        return undefined;
+    }
 }
 
 // Resolve which timeout (in ms) applies to a given hook, walking from

@@ -3,15 +3,8 @@ import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
 import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
-import { formatDuration } from "../duration.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
-import {
-    HookFailureError,
-    HookTimeoutError,
-    normalizeHook,
-    resolveHookTimeout,
-    runHook,
-} from "../hooks.ts";
+import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import { wireGroup } from "../wiring.ts";
 
@@ -80,30 +73,16 @@ export async function addCommand(
         if (!hook) {
             continue;
         }
-        const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
-        const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
-        console.log(`[${repoName}] ${phase} hook${timeoutMs ? ` (timeout: ${timeoutMs}ms)` : ""}`);
-        if (!opts.verbose) {
-            console.log(`  $ (${cwd}) ${hook.command}`);
-        }
-        try {
-            const r = await runHook(hook.command, cwd, {
-                timeoutMs,
-                verbose: opts.verbose,
-                label: opts.verbose ? repoName : undefined,
-            });
-            console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
-        } catch (err) {
-            if (!opts.verbose && (err instanceof HookFailureError || err instanceof HookTimeoutError)) {
-                if (err.output) {
-                    process.stderr.write(err.output);
-                    if (!err.output.endsWith("\n")) {
-                        process.stderr.write("\n");
-                    }
-                }
-            }
-            throw err;
-        }
+        await runMemberHook({
+            phase,
+            repoName,
+            hook,
+            repoPath,
+            worktreePath,
+            repoCfg,
+            config,
+            verbose: opts.verbose,
+        });
     }
 
     // Re-wire across the whole group: the new repo's exposes (if any) may

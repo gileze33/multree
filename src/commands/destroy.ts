@@ -1,12 +1,6 @@
 import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
-import {
-    HookFailureError,
-    HookTimeoutError,
-    normalizeHook,
-    resolveHookTimeout,
-    runHook,
-} from "../hooks.ts";
+import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { deleteGroupDir, loadGroup } from "../state.ts";
 
 export async function destroyCommand(name: string): Promise<void> {
@@ -25,18 +19,15 @@ export async function destroyCommand(name: string): Promise<void> {
 
         const teardownHook = normalizeHook(repoCfg.hooks?.teardown);
         if (teardownHook) {
-            try {
-                console.log(`[${repoName}] teardown hook`);
-                const cwd = teardownHook.cwd === "repo" ? expandPath(repoCfg.path) : member.path;
-                const timeoutMs = resolveHookTimeout(teardownHook, repoCfg, config);
-                await runHook(teardownHook.command, cwd, { timeoutMs, verbose: true, label: repoName });
-            } catch (err) {
-                if (err instanceof HookFailureError || err instanceof HookTimeoutError) {
-                    console.error(`[${repoName}] teardown failed: ${err.message}`);
-                } else {
-                    console.error(`[${repoName}] teardown failed: ${err instanceof Error ? err.message : err}`);
-                }
-            }
+            await runMemberHook({
+                phase: "teardown",
+                repoName,
+                hook: teardownHook,
+                repoPath: expandPath(repoCfg.path),
+                worktreePath: member.path,
+                repoCfg,
+                config,
+            });
         }
 
         console.log(`[${repoName}] removing worktree`);

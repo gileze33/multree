@@ -18,7 +18,7 @@ if libc.clonefile(sys.argv[1].encode(), sys.argv[2].encode(), 0) != 0:
 
 function clonefileDir(src: string, dst: string): boolean {
     try {
-        execFileSync("/usr/bin/python3", ["-c", CLONEFILE_PY, src, dst], { stdio: "pipe" });
+        execFileSync("python3", ["-c", CLONEFILE_PY, src, dst], { stdio: "pipe" });
         return true;
     } catch {
         return false;

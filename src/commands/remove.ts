@@ -1,6 +1,6 @@
 import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
-import { normalizeHook, runHook } from "../hooks.ts";
+import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { loadGroup, saveGroup } from "../state.ts";
 import { wireGroup } from "../wiring.ts";
 
@@ -20,13 +20,15 @@ export async function removeCommand(groupName: string, repoName: string): Promis
 
     const teardownHook = normalizeHook(repoCfg?.hooks?.teardown);
     if (teardownHook && repoCfg) {
-        try {
-            console.log(`[${repoName}] teardown hook`);
-            const cwd = teardownHook.cwd === "repo" ? expandPath(repoCfg.path) : member.path;
-            await runHook(teardownHook.command, cwd);
-        } catch (err) {
-            console.error(`[${repoName}] teardown failed: ${err instanceof Error ? err.message : err}`);
-        }
+        await runMemberHook({
+            phase: "teardown",
+            repoName,
+            hook: teardownHook,
+            repoPath: expandPath(repoCfg.path),
+            worktreePath: member.path,
+            repoCfg,
+            config,
+        });
     }
 
     if (repoCfg) {

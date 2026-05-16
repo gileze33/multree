@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -76,5 +76,49 @@ describe("create + destroy (happy path)", () => {
 
         const frontendEnv = readFileSync(join(sb.worktreePath("solo", "frontend"), ".env"), "utf-8");
         assert.match(frontendEnv, /API_URL=http:\/\/localhost:5000/);
+    });
+});
+
+// End-to-end coverage that the prime phase actually copies the source repo's
+// working-tree artifacts into a new worktree during `multree create`. The
+// unit tests in tests/unit/artifacts.test.ts exercise primeArtifacts directly;
+// this test pins the wiring through the CLI.
+describe("create with prime_artifacts", () => {
+    let sb: Sandbox;
+
+    beforeEach(() => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [
+                        { path: "node_modules", strategy: "copy" },
+                        { find: "build-cache", strategy: "copy" },
+                    ],
+                },
+            ],
+        });
+        // Plant working-tree-only artifacts in the source repo (post-commit,
+        // so they're not on `develop` and the new worktree starts without
+        // them). This mirrors a real dev's `npm install` outputs.
+        const repo = sb.repoPath("api");
+        mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
+        writeFileSync(join(repo, "node_modules", "pkg", "index.js"), "module.exports = 1;");
+        mkdirSync(join(repo, "packages", "a", "build-cache"), { recursive: true });
+        writeFileSync(join(repo, "packages", "a", "build-cache", "marker"), "cache-a");
+    });
+    afterEach(() => sb.cleanup());
+
+    it("copies `path` and `find` artifacts from the source repo into the worktree", () => {
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const wt = sb.worktreePath("g", "api");
+        const copiedNm = join(wt, "node_modules", "pkg", "index.js");
+        assert.equal(readFileSync(copiedNm, "utf-8"), "module.exports = 1;");
+
+        const copiedCache = join(wt, "packages", "a", "build-cache", "marker");
+        assert.equal(readFileSync(copiedCache, "utf-8"), "cache-a");
     });
 });
