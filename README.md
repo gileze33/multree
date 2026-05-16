@@ -23,7 +23,7 @@ npm i -g multree-cli
 multree --help
 ```
 
-The package is published as `multree-cli` (npm refused the bare `multree` for being too close to `multer`), but the CLI command it installs is `multree`. Requires Node 20.6+.
+Requires Node 20.6+.
 
 From source (for contributors):
 
