@@ -8,14 +8,12 @@ import {
     type MainCheckoutReleasePlan,
 } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
-import { formatDuration } from "../duration.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
 import {
     HookFailureError,
     HookTimeoutError,
     normalizeHook,
-    resolveHookTimeout,
-    runHook,
+    runMemberHook,
 } from "../hooks.ts";
 import { runScheduled, topoOrder } from "../scheduler.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
@@ -255,31 +253,16 @@ async function executePhase(
     if (!hook) {
         return;
     }
-    const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
-    const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
-    console.log(`[${repoName}] ${phase} hook${timeoutMs ? ` (timeout: ${timeoutMs}ms)` : ""}`);
-    if (!verbose) {
-        console.log(`  $ (${cwd}) ${hook.command}`);
-    }
-    try {
-        const r = await runHook(hook.command, cwd, {
-            timeoutMs,
-            verbose,
-            label: verbose ? repoName : undefined,
-        });
-        console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
-    } catch (err) {
-        if (!verbose && (err instanceof HookFailureError || err instanceof HookTimeoutError)) {
-            // Surface captured output on failure when we weren't streaming.
-            if (err.output) {
-                process.stderr.write(err.output);
-                if (!err.output.endsWith("\n")) {
-                    process.stderr.write("\n");
-                }
-            }
-        }
-        throw err;
-    }
+    await runMemberHook({
+        phase,
+        repoName,
+        hook,
+        repoPath,
+        worktreePath,
+        repoCfg,
+        config,
+        verbose,
+    });
     if (phase === "setup") {
         member.exposes = readExposes(worktreePath, repoCfg.exposes);
     }
@@ -342,7 +325,10 @@ function printPlan(
             `topo order from depends_on):`,
     );
     for (const repoName of setupOrder) {
-        const p = plans.find(x => x.repoName === repoName)!;
+        const p = plans.find(x => x.repoName === repoName);
+        if (!p) {
+            throw new Error(`internal: plan missing for ${repoName}`);
+        }
         const hook = normalizeHook(p.repoCfg.hooks?.setup);
         const deps = depsOf[repoName] ? ` (after: ${depsOf[repoName].join(", ")})` : "";
         console.log(`  [${repoName}] ${hook ? hook.command : "(none)"}${deps}`);
