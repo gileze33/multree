@@ -139,6 +139,19 @@ describe("update notify", () => {
             assert.equal(readCacheFile(), null);
         });
 
+        it("__update-check refuses a non-semver version (taint barrier)", async () => {
+            // ANSI escape + path traversal + control bytes — none of which
+            // must ever reach the cache file or the user's terminal.
+            response = {
+                status: 200,
+                body: JSON.stringify({ version: "1.2.3[31m../../etc/passwd" }),
+            };
+            const env = envWith({ MULTREE_REGISTRY_URL: url });
+            const result = await spawnCliAsync(env, ["__update-check"]);
+            assert.equal(result.status, 0);
+            assert.equal(readCacheFile(), null, "non-semver values must be refused at the boundary");
+        });
+
         it("kick → background fetch → notify on the next run", async () => {
             // First run: cache is empty, so kickBackgroundCheck spawns the
             // detached child. The parent doesn't wait for it.

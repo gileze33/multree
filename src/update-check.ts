@@ -21,6 +21,12 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 3000;
 const CACHE_FILENAME = "version-check.json";
 
+// Strict semver shape: digit-only major/minor/patch with optional
+// pre-release / build-metadata tags. Anything else (whitespace, control
+// chars, path separators, ANSI escapes) is refused at the network boundary
+// so it can never reach the cache file, the user's terminal, or disk.
+const SEMVER_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/;
+
 function registryUrl(): string {
     // Test-only override so the integration suite can point the fetch at a
     // local HTTP server. Production paths always hit the npm registry.
@@ -211,7 +217,12 @@ export async function runUpdateCheck(): Promise<void> {
             return;
         }
         const data = (await res.json()) as { version?: unknown };
-        if (typeof data.version !== "string" || data.version.length === 0) {
+        // Validate against a strict semver shape before letting the value
+        // touch the filesystem or the user's terminal. The registry is
+        // trusted in practice, but treating its payload as untrusted
+        // network data is cheap insurance against a compromised mirror,
+        // a MITM, or a typosquatted endpoint via MULTREE_REGISTRY_URL.
+        if (typeof data.version !== "string" || !SEMVER_RE.test(data.version)) {
             return;
         }
         writeCache({ latest: data.version, checked_at: new Date().toISOString() });
