@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased](https://github.com/gileze33/multree/compare/v0.1.1...HEAD)
 
+### Added
+
+- Notify-only update check against the npm registry. The registry is refetched every few hours in a detached background process so it never blocks the current command, and the next run reads the cache to print a one-line notice on stderr if you're behind. Suppressed by `CI`, non-TTY stderr, or `MULTREE_NO_UPDATE_CHECK=1`.
+
 ## v0.1.1 - 2026-05-16
 
 ### Merged
