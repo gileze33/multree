@@ -218,6 +218,29 @@ describe("create --verbose", () => {
     });
 });
 
+// parseJobs in cli.ts rejects non-positive and non-numeric values up-front,
+// before any fetch / worktree work is attempted.
+describe("create --jobs validation", () => {
+    let sb: Sandbox;
+    beforeEach(() => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" }],
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    for (const value of ["0", "-1", "abc"]) {
+        it(`rejects --jobs ${value}`, () => {
+            const r = runMultree(sb, ["create", "g", "--include", "api", "--jobs", value]);
+            assert.notEqual(r.status, 0);
+            assert.match(r.stderr, /--jobs must be a positive integer/);
+            // Bail-out is before any work happens: no state, no worktree dir.
+            assert.equal(sb.state("g"), null);
+            assert.equal(existsSync(join(sb.worktreeRoot, "g")), false);
+        });
+    }
+});
+
 // On a non-verbose hook failure the captured output is dumped to stderr so
 // the user can see *why* the hook failed without re-running with --verbose.
 // This is a regression net for the runMemberHook helper.

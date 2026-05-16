@@ -50,4 +50,24 @@ describe("push", () => {
         assert.notEqual(r.status, 0);
         assert.match(r.stdout, /✗ api: push failed/);
     });
+
+    // Re-pushing with explicit --set-upstream on a branch whose upstream is
+    // already configured must not error (git would reject a duplicate -u
+    // only if the value differed; here it matches, so it's a no-op).
+    it("accepts explicit --set-upstream on a branch already tracking origin", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        // First push auto-sets upstream.
+        const first = runMultree(sb, ["push", "g"]);
+        assert.equal(first.status, 0, first.stderr);
+
+        const second = runMultree(sb, ["push", "g", "--set-upstream"]);
+        assert.equal(second.status, 0, second.stderr);
+        assert.match(second.stdout, /✓ api \(multree\/g\)/);
+    });
+
+    it("errors when the group does not exist", () => {
+        const r = runMultree(sb, ["push", "ghost"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Group not found: ghost/);
+    });
 });

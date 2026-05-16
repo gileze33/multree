@@ -42,6 +42,8 @@ export interface FakeRepoSpec {
     updateStrategy?: "rebase" | "merge";
     mainCheckoutAction?: MainCheckoutAction;
     dependsOn?: string[];
+    // Per-repo branch_base override. Defaults to "develop".
+    branchBase?: string;
     // Per-repo hook timeout (string or seconds).
     hookTimeout?: string | number;
     // Artifacts to prime into each worktree before install runs.
@@ -167,7 +169,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
 
         repos[spec.key] = {
             path: repoDir,
-            branch_base: "develop",
+            branch_base: spec.branchBase ?? "develop",
             hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
             exposes: spec.exposes,
             consumes: spec.consumes,

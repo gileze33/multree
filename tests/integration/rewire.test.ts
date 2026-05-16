@@ -77,4 +77,10 @@ describe("rewire", () => {
         assert.match(after, /EXISTING=keep/);
         assert.match(after, /# >>> multree-managed: g >>>/);
     });
+
+    it("errors when the group does not exist", () => {
+        const r = runMultree(sb, ["rewire", "ghost"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Group not found: ghost/);
+    });
 });
