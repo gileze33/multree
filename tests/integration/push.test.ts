@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { execSync } from "node:child_process";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
 import { createSandbox, type Sandbox } from "../helpers/sandbox.ts";
@@ -69,5 +70,20 @@ describe("push", () => {
         const r = runMultree(sb, ["push", "ghost"]);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /Group not found: ghost/);
+    });
+
+    // currentBranch returns null on a detached worktree, so push falls back
+    // to the recorded member.branch. The local ref "multree/g" still points
+    // at the same commit (detach only moves HEAD), so the push targets the
+    // right branch on the remote rather than literally pushing "HEAD".
+    it("pushes the recorded branch when the worktree HEAD is detached", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        const wt = sb.worktreePath("g", "api");
+        execSync(`git -C "${wt}" switch -q --detach`, { stdio: "pipe" });
+
+        const r = runMultree(sb, ["push", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /✓ api \(multree\/g\)/);
+        assert.ok(sb.remoteHasBranch("api", "multree/g"));
     });
 });

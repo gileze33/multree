@@ -79,6 +79,21 @@ describe("status", () => {
     // placeholder rather than crashing. Reaching that branch requires a
     // template that resolves at create time (so wireGroup succeeds) but is
     // broken later — easiest is to mutate the manifest after create.
+    // currentBranch returns null on a detached worktree; status falls back to
+    // the recorded member.branch and tags the line with "(detached)" so the
+    // user knows the worktree isn't sitting on a named branch.
+    it("flags a detached HEAD and falls back to the recorded branch", () => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" }],
+        });
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        execSync(`git -C "${sb.worktreePath("g", "api")}" switch -q --detach`, { stdio: "pipe" });
+
+        const r = runMultree(sb, ["status", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /branch: multree\/g \(detached\)/);
+    });
+
     it("renders <unresolved: ...> when a consumes template references a missing key", () => {
         runMultree(sb, ["create", "g", "--include", "api,frontend"]);
 
