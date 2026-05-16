@@ -16,6 +16,7 @@ import type {
     GroupState,
     MainCheckoutAction,
     MultreeConfig,
+    PrimeArtifactSpec,
 } from "../../src/types.ts";
 
 export interface FakeRepoSpec {
@@ -43,6 +44,8 @@ export interface FakeRepoSpec {
     dependsOn?: string[];
     // Per-repo hook timeout (string or seconds).
     hookTimeout?: string | number;
+    // Artifacts to prime into each worktree before install runs.
+    primeArtifacts?: PrimeArtifactSpec[];
 }
 
 export interface SandboxOptions {
@@ -173,6 +176,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             update_strategy: spec.updateStrategy,
             main_checkout_action: spec.mainCheckoutAction,
             depends_on: spec.dependsOn,
+            prime_artifacts: spec.primeArtifacts,
         };
     }
 

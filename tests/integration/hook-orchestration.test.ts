@@ -217,3 +217,29 @@ describe("create --verbose", () => {
         assert.doesNotMatch(r.stdout, /\[noisy\] MULTREE_VERBOSE_MARKER_XYZ/);
     });
 });
+
+// On a non-verbose hook failure the captured output is dumped to stderr so
+// the user can see *why* the hook failed without re-running with --verbose.
+// This is a regression net for the runMemberHook helper.
+describe("create hook failure output", () => {
+    let sb: Sandbox;
+    beforeEach(() => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "noisy",
+                    dirname: "fake-noisy",
+                    setup: "echo HOOK_STDOUT_FAIL_MARKER; echo HOOK_STDERR_FAIL_MARKER >&2; exit 1",
+                },
+            ],
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    it("surfaces captured stdout+stderr on stderr when a non-verbose hook fails", () => {
+        const r = runMultree(sb, ["create", "g", "--include", "noisy"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /HOOK_STDOUT_FAIL_MARKER/);
+        assert.match(r.stderr, /HOOK_STDERR_FAIL_MARKER/);
+    });
+});
