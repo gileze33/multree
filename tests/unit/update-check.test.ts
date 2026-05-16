@@ -20,18 +20,35 @@ describe("compareSemver", () => {
     it("returns zero on equality", () => {
         assert.equal(compareSemver("1.2.3", "1.2.3"), 0);
         assert.equal(compareSemver("v1.2.3", "1.2.3"), 0);
+        assert.equal(compareSemver("v1.2.3", "v1.2.3"), 0);
+    });
+
+    it("compares double-digit components numerically, not lexically", () => {
+        assert.equal(compareSemver("1.10.0", "1.9.9"), 1);
+        assert.equal(compareSemver("1.9.9", "1.10.0"), -1);
+        assert.equal(compareSemver("10.0.0", "2.0.0"), 1);
+    });
+
+    it("handles 0.x versions consistently", () => {
+        assert.equal(compareSemver("0.1.2", "0.1.1"), 1);
+        assert.equal(compareSemver("0.0.1", "0.0.0"), 1);
+        assert.equal(compareSemver("0.2.0", "0.1.999"), 1);
     });
 
     it("bails out (returns 0) on pre-release tags", () => {
         // We don't want to nag users on stable releases about a -rc on latest.
         assert.equal(compareSemver("1.2.4-rc.1", "1.2.3"), 0);
         assert.equal(compareSemver("1.2.3", "1.2.4-rc.1"), 0);
+        assert.equal(compareSemver("1.2.3-beta", "1.2.3-alpha"), 0);
     });
 
     it("returns zero on malformed input", () => {
         assert.equal(compareSemver("not-a-version", "1.2.3"), 0);
         assert.equal(compareSemver("1.2", "1.2.3"), 0);
         assert.equal(compareSemver("1.2.3.4", "1.2.3"), 0);
+        assert.equal(compareSemver("", "1.2.3"), 0);
+        assert.equal(compareSemver("1.x.0", "1.2.0"), 0);
+        assert.equal(compareSemver("1.-1.0", "1.0.0"), 0);
     });
 });
 
@@ -120,6 +137,60 @@ describe("update-check cache integration", () => {
         assert.equal(captured, "");
     });
 
+    it("treats truthy CI values (\"1\", \"true\", \"yes\") as in-CI when FORCE is off", async () => {
+        writeFileSync(
+            join(dir, "version-check.json"),
+            JSON.stringify({ latest: "9.9.9", checked_at: new Date().toISOString() }),
+        );
+        delete process.env.MULTREE_FORCE_UPDATE_CHECK;
+        for (const v of ["1", "true", "TRUE", "yes"]) {
+            process.env.CI = v;
+            const { notifyIfNewer } = await import("../../src/update-check.ts");
+            const captured = await captureStderr(() => notifyIfNewer("0.1.1"));
+            assert.equal(captured, "", `CI=${JSON.stringify(v)} should suppress`);
+        }
+    });
+
+    it("MULTREE_FORCE_UPDATE_CHECK overrides every other suppression source", async () => {
+        writeFileSync(
+            join(dir, "version-check.json"),
+            JSON.stringify({ latest: "9.9.9", checked_at: new Date().toISOString() }),
+        );
+        process.env.MULTREE_FORCE_UPDATE_CHECK = "1";
+        process.env.CI = "true";
+        process.env.MULTREE_NO_UPDATE_CHECK = "1";
+        const { notifyIfNewer } = await import("../../src/update-check.ts");
+        const captured = await captureStderr(() => notifyIfNewer("0.1.1"));
+        assert.match(captured, /new version available/);
+    });
+
+    it("notifyIfNewer treats a cache missing required fields as no cache", async () => {
+        // Valid JSON but wrong shape -> should not crash, should not print.
+        writeFileSync(
+            join(dir, "version-check.json"),
+            JSON.stringify({ latest: 999, checked_at: 0 }),
+        );
+        const captured = await captureStderr(async () => {
+            const { notifyIfNewer } = await import("../../src/update-check.ts");
+            notifyIfNewer("0.1.1");
+        });
+        assert.equal(captured, "");
+    });
+
+    it("notice format contains the install command and arrow with both versions", async () => {
+        writeFileSync(
+            join(dir, "version-check.json"),
+            JSON.stringify({ latest: "1.2.3", checked_at: new Date().toISOString() }),
+        );
+        const captured = await captureStderr(async () => {
+            const { notifyIfNewer } = await import("../../src/update-check.ts");
+            notifyIfNewer("0.1.1");
+        });
+        // Single line, ends in newline, contains both version sides + cmd.
+        assert.equal(captured.split("\n").filter(Boolean).length, 1);
+        assert.match(captured, /\[multree\] new version available: 0\.1\.1 → 1\.2\.3 \(run: npm i -g multree-cli@latest\)\n$/);
+    });
+
     it("notifyIfNewer ignores corrupt cache files", async () => {
         writeFileSync(join(dir, "version-check.json"), "{ not valid json");
         const captured = await captureStderr(async () => {
@@ -129,7 +200,7 @@ describe("update-check cache integration", () => {
         assert.equal(captured, "");
     });
 
-    it("kickBackgroundCheck respects the 24h cache window (no child spawned)", async () => {
+    it("kickBackgroundCheck respects a fresh cache window (no child spawned)", async () => {
         // Recent cache: kickBackgroundCheck must NOT relaunch the CLI.
         writeFileSync(
             join(dir, "version-check.json"),

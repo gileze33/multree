@@ -154,7 +154,7 @@ Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.
 
 ## Update notifications
 
-multree checks the npm registry once every 24 hours for a newer published version and, on the next run, prints a one-line notice to stderr if you're behind:
+multree checks the npm registry every few hours for a newer published version and, on the next run, prints a one-line notice to stderr if you're behind:
 
 ```
 [multree] new version available: 0.1.1 → 0.2.0 (run: npm i -g multree-cli@latest)

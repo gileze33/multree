@@ -1,6 +1,6 @@
 // Lightweight "notify-only" CLI version check. The current run never blocks
-// on the network: a detached child process refreshes a small cache file once
-// per day, and the next run reads that cache to print a one-line notice if
+// on the network: a detached child process refreshes a small cache file every
+// few hours, and the next run reads that cache to print a one-line notice if
 // the installed version is behind.
 //
 // Source of truth: the npm registry (`registry.npmjs.org/multree-cli/latest`).
@@ -16,10 +16,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PACKAGE_NAME = "multree-cli";
-const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 3000;
 const CACHE_FILENAME = "version-check.json";
+
+function registryUrl(): string {
+    // Test-only override so the integration suite can point the fetch at a
+    // local HTTP server. Production paths always hit the npm registry.
+    return process.env.MULTREE_REGISTRY_URL ?? DEFAULT_REGISTRY_URL;
+}
 
 interface VersionCache {
     latest: string;
@@ -197,7 +203,7 @@ export async function runUpdateCheck(): Promise<void> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-        const res = await fetch(REGISTRY_URL, {
+        const res = await fetch(registryUrl(), {
             signal: controller.signal,
             headers: { accept: "application/json" },
         });
