@@ -1,11 +1,16 @@
 import { existsSync, mkdirSync } from "fs";
 import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
+import {
+    executeMainCheckoutRelease,
+    planMainCheckoutRelease,
+    type MainCheckoutReleasePlan,
+} from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
 import { normalizeHook, runHook } from "../hooks.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
-import type { GroupState } from "../types.ts";
+import type { GroupState, MultreeConfig, RepoConfig } from "../types.ts";
 import { readExposes, wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
@@ -19,6 +24,17 @@ interface CreateArgs {
     // Per-repo override of the branch used for that member's worktree. Used
     // when branch names differ across repos for the same logical work.
     branchesByRepo?: Record<string, string>;
+}
+
+// Pre-flight plan: everything the main loop needs so it doesn't have to
+// re-do discovery work after the worktrees start being created.
+interface MemberPlan {
+    repoName: string;
+    repoCfg: RepoConfig;
+    repoPath: string;
+    worktreePath: string;
+    repoBranch: string;
+    releasePlan?: MainCheckoutReleasePlan;
 }
 
 export async function createCommand(args: CreateArgs): Promise<void> {
@@ -51,6 +67,11 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     if (existsSync(dir)) {
         throw new Error(`Group directory already exists: ${dir}`);
     }
+
+    // ---- Pre-flight: validate every member before any side effects. ----
+    const plans = preflight(config, args, defaultBranch, dir);
+
+    // ---- Execute. ----
     mkdirSync(dir, { recursive: true });
 
     const group: GroupState = {
@@ -65,28 +86,11 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     // so destroy can always find what to clean up even if a hook throws.
     saveGroup(config, group);
 
-    for (const repoName of args.include) {
-        const repoCfg = config.repos[repoName];
-        const repoPath = expandPath(repoCfg.path);
-        const worktreePath = join(dir, basename(repoPath));
-        const repoBranch = args.branchesByRepo?.[repoName] ?? defaultBranch;
+    for (const plan of plans) {
+        const { repoName, repoCfg, repoPath, worktreePath, repoBranch } = plan;
 
-        console.log(`\n[${repoName}] git fetch`);
-        fetchRepo(repoPath);
-
-        // When the user said --from (or --from-<repo>), the branch must
-        // already exist somewhere — otherwise we'd silently create it from
-        // baseRef, which is the opposite of what the flag promises.
-        const fromBranchRequested = args.from !== undefined
-            || args.branchesByRepo?.[repoName] !== undefined;
-        if (
-            fromBranchRequested
-            && !branchExists(repoPath, repoBranch)
-            && !remoteBranchExists(repoPath, "origin", repoBranch)
-        ) {
-            throw new Error(
-                `[${repoName}] --from branch "${repoBranch}" not found locally or on origin in ${repoPath}`,
-            );
+        if (plan.releasePlan) {
+            executeMainCheckoutRelease(repoName, repoPath, repoBranch, plan.releasePlan);
         }
 
         console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
@@ -137,4 +141,68 @@ export async function createCommand(args: CreateArgs): Promise<void> {
             console.log(`    exposed ${k}=${v}`);
         }
     }
+}
+
+// Runs every check we can run without touching worktrees. Fetches each repo
+// up-front (the network cost we'd pay anyway) so branch-existence checks see
+// fresh remote-tracking refs. Throws a single aggregated error if any plan
+// item is invalid; the main loop is only entered after every member passes.
+function preflight(
+    config: MultreeConfig,
+    args: CreateArgs,
+    defaultBranch: string,
+    dir: string,
+): MemberPlan[] {
+    const plans: MemberPlan[] = [];
+    const errors: string[] = [];
+
+    for (const repoName of args.include) {
+        const repoCfg = config.repos[repoName];
+        const repoPath = expandPath(repoCfg.path);
+        const worktreePath = join(dir, basename(repoPath));
+        const repoBranch = args.branchesByRepo?.[repoName] ?? defaultBranch;
+
+        console.log(`\n[${repoName}] git fetch`);
+        fetchRepo(repoPath);
+
+        const fromBranchRequested = args.from !== undefined
+            || args.branchesByRepo?.[repoName] !== undefined;
+        const localExists = branchExists(repoPath, repoBranch);
+        const remoteExists = remoteBranchExists(repoPath, "origin", repoBranch);
+
+        if (fromBranchRequested && !localExists && !remoteExists) {
+            errors.push(
+                `[${repoName}] --from branch "${repoBranch}" not found locally or on origin in ${repoPath}`,
+            );
+            continue;
+        }
+
+        if (existsSync(worktreePath)) {
+            errors.push(`[${repoName}] worktree path already exists: ${worktreePath}`);
+            continue;
+        }
+
+        const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
+        if (release.error) {
+            errors.push(release.error);
+            continue;
+        }
+
+        plans.push({
+            repoName,
+            repoCfg,
+            repoPath,
+            worktreePath,
+            repoBranch,
+            releasePlan: release.plan,
+        });
+    }
+
+    if (errors.length > 0) {
+        throw new Error(
+            `create aborted; ${errors.length} member${errors.length === 1 ? "" : "s"} failed pre-flight:\n  ` +
+                errors.join("\n  "),
+        );
+    }
+    return plans;
 }

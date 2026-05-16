@@ -16,8 +16,14 @@ version: 1
 worktree_root: ~/dev/worktree
 
 # Default strategy used by `multree update` when no per-repo override and no
-# --strategy flag is given. Either "merge" (default) or "rebase".
-# update_strategy: rebase
+# --strategy flag is given. Either "rebase" (default) or "merge".
+# update_strategy: merge
+
+# What to do when a target branch is already checked out in a repo's main
+# source: "switch" (default) moves the main checkout onto its branch_base
+# (with leading "origin/" stripped), "detach" leaves it on a detached HEAD,
+# "error" refuses to act. Per-repo overrides allowed.
+# main_checkout_action: detach
 
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen

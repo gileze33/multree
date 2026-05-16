@@ -202,6 +202,14 @@ export function findBranchCheckout(
     return listWorktrees(repoPath).find(w => w.branch === branch) ?? null;
 }
 
+export function switchBranch(repoPath: string, branch: string): void {
+    gitInherit(repoPath, ["switch", branch]);
+}
+
+export function detachHead(repoPath: string): void {
+    gitInherit(repoPath, ["switch", "--detach"]);
+}
+
 export function addWorktree(
     repoPath: string,
     worktreePath: string,

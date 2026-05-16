@@ -14,6 +14,7 @@ import type {
     ConsumeSpec,
     ExposeSpec,
     GroupState,
+    MainCheckoutAction,
     MultreeConfig,
 } from "../../src/types.ts";
 
@@ -38,10 +39,15 @@ export interface FakeRepoSpec {
     // Repo manifest overrides.
     push?: boolean;
     updateStrategy?: "rebase" | "merge";
+    mainCheckoutAction?: MainCheckoutAction;
 }
 
 export interface SandboxOptions {
     repos: FakeRepoSpec[];
+    // Manifest-level config knobs. Useful for asserting that the
+    // top-level defaults flow through when no per-repo override is set.
+    updateStrategy?: "rebase" | "merge";
+    mainCheckoutAction?: MainCheckoutAction;
 }
 
 export interface Sandbox {
@@ -156,6 +162,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             defaults: spec.defaults,
             push: spec.push,
             update_strategy: spec.updateStrategy,
+            main_checkout_action: spec.mainCheckoutAction,
         };
     }
 
@@ -163,6 +170,8 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         version: 1,
         worktree_root: worktreeRoot,
         repos,
+        update_strategy: opts.updateStrategy,
+        main_checkout_action: opts.mainCheckoutAction,
     };
 
     const manifestPath = join(root, "multree.config.yaml");

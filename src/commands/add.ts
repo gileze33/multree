@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
+import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
 import { normalizeHook, runHook } from "../hooks.ts";
@@ -34,6 +35,18 @@ export async function addCommand(groupName: string, repoName: string): Promise<v
     fetchRepo(repoPath);
 
     const repoBranch = group.branch;
+
+    // Decide up-front whether we can take this branch (it might be held by
+    // the main checkout or another worktree). Bail before any side effects
+    // if not.
+    const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
+    if (release.error) {
+        throw new Error(release.error);
+    }
+    if (release.plan) {
+        executeMainCheckoutRelease(repoName, repoPath, repoBranch, release.plan);
+    }
+
     console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
     addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
 

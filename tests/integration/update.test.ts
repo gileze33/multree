@@ -19,7 +19,7 @@ describe("update", () => {
 
     afterEach(() => sb.cleanup());
 
-    it("merges base into each member's branch by default", () => {
+    it("rebases base into each member's branch by default", () => {
         const create = runMultree(sb, ["create", "g", "--include", "api,frontend"]);
         assert.equal(create.status, 0, create.stderr);
 
@@ -28,10 +28,10 @@ describe("update", () => {
 
         const r = runMultree(sb, ["update", "g"]);
         assert.equal(r.status, 0, r.stderr);
-        assert.match(r.stdout, /✓ api \(merge\)/);
-        assert.match(r.stdout, /✓ frontend \(merge\)/);
+        assert.match(r.stdout, /✓ api \(rebase\)/);
+        assert.match(r.stdout, /✓ frontend \(rebase\)/);
 
-        // After merge, develop is reachable from each worktree's HEAD.
+        // After rebase, develop is reachable from each worktree's HEAD.
         for (const key of ["api", "frontend"]) {
             const out = sb.gitInRepo(
                 key,
@@ -41,13 +41,13 @@ describe("update", () => {
         }
     });
 
-    it("rebases when --strategy rebase is given", () => {
+    it("merges when --strategy merge is given", () => {
         runMultree(sb, ["create", "g", "--include", "api"]);
         sb.advanceDevelop("api", "ahead");
 
-        const r = runMultree(sb, ["update", "g", "--strategy", "rebase"]);
+        const r = runMultree(sb, ["update", "g", "--strategy", "merge"]);
         assert.equal(r.status, 0, r.stderr);
-        assert.match(r.stdout, /✓ api \(rebase\)/);
+        assert.match(r.stdout, /✓ api \(merge\)/);
     });
 
     it("skips members with a dirty working tree and reports them", () => {
@@ -69,5 +69,46 @@ describe("update", () => {
         const r = runMultree(sb, ["update", "g", "--strategy", "squash"]);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /Invalid --strategy/);
+    });
+
+    it("manifest-level update_strategy overrides the built-in default", () => {
+        sb = createSandbox({
+            updateStrategy: "merge",
+            repos: [
+                { key: "api", dirname: "fake-api" },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+        sb.advanceDevelop("api");
+        sb.advanceDevelop("frontend");
+
+        const r = runMultree(sb, ["update", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /✓ api \(merge\)/);
+        assert.match(r.stdout, /✓ frontend \(merge\)/);
+    });
+
+    it("per-repo update_strategy overrides the manifest-level default", () => {
+        // Manifest default is "merge"; api is explicitly "rebase".
+        sb = createSandbox({
+            updateStrategy: "merge",
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    updateStrategy: "rebase",
+                },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+        sb.advanceDevelop("api");
+        sb.advanceDevelop("frontend");
+
+        const r = runMultree(sb, ["update", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /✓ api \(rebase\)/);
+        assert.match(r.stdout, /✓ frontend \(merge\)/);
     });
 });

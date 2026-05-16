@@ -65,7 +65,8 @@ The repo only ships `multree.config.example.yaml`; your personal `~/multree.conf
 - `repos.<name>.prime_artifacts` — APFS-reflink (macOS) or `--reflink=auto` (Linux) large trees like `node_modules` from the main checkout into the worktree so install reconciles instead of cold-installing.
 - `repos.<name>.update_strategy` — `rebase` or `merge`; overrides the manifest-level default for `multree update`.
 - `repos.<name>.push` — set `false` to skip this repo in `multree push`. Defaults to `true`.
-- `update_strategy` (top-level) — default strategy used by `multree update` when neither a per-repo override nor `--strategy` is given. Defaults to `merge`.
+- `update_strategy` (top-level) — default strategy used by `multree update` when neither a per-repo override nor `--strategy` is given. Defaults to `rebase`.
+- `main_checkout_action` (top-level, also per-repo) — what to do when a target branch is already checked out in a repo's main source. `switch` (default) moves the main checkout onto its `branch_base` (with any leading `origin/` stripped), `detach` leaves it on a detached HEAD, `error` refuses to act. Pre-flight aborts the whole `create` (no half-built groups) if any repo's plan can't be satisfied — including dirty main checkouts, branches held by other worktrees, or `--from` branches that don't exist.
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
 
@@ -141,7 +142,7 @@ multree --help
 
 `status` prints a per-member snapshot: current branch, ahead/behind vs `branch_base`, dirty/clean, last commit, currently exposed values, and the resolved consume targets. `--fetch` runs `git fetch` in each source repo first so the ahead/behind numbers reflect the latest remote state.
 
-`update` fetches each member's source repo, then rebases or merges that repo's `branch_base` into the member's branch. Strategy precedence: `--strategy` flag → per-repo `update_strategy` → manifest-level `update_strategy` → `merge`. Members with a dirty working tree are skipped and reported at the end. If a rebase or merge fails the operation is aborted in that worktree (no half-applied state) and the command exits non-zero.
+`update` fetches each member's source repo, then rebases or merges that repo's `branch_base` into the member's branch. Strategy precedence: `--strategy` flag → per-repo `update_strategy` → manifest-level `update_strategy` → `rebase`. Members with a dirty working tree are skipped and reported at the end. If a rebase or merge fails the operation is aborted in that worktree (no half-applied state) and the command exits non-zero.
 
 `push` pushes every member's current branch to `origin`, automatically applying `--set-upstream` on first push. Repos with `push: false` in the manifest are skipped (use for read-only mirrors). Any failed push surfaces in the summary and exits non-zero.
 
