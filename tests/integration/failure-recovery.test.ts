@@ -33,14 +33,21 @@ describe("create that fails partway", () => {
         const state = sb.state("g");
         assert.ok(state, "state file missing after failed create");
 
-        // api and broken got worktrees added before the failure; later did not.
+        // Worktrees are created up front in a dedicated phase, so all three
+        // are persisted. The setup phase records which members succeeded.
         assert.ok(state!.members.api, "api not recorded in state");
         assert.ok(state!.members.broken, "broken not recorded in state");
-        assert.equal(state!.members.later, undefined, "later should not be in state");
+        assert.ok(state!.members.later, "later not recorded in state");
+
+        assert.equal(state!.members.api.phase_status?.setup, "done");
+        assert.equal(state!.members.broken.phase_status?.setup, "failed");
+        // `later` never ran setup because the failure halts the phase before
+        // launching any further work — its setup status is absent.
+        assert.equal(state!.members.later.phase_status?.setup, undefined);
 
         assert.ok(existsSync(sb.worktreePath("g", "api")), "api worktree missing on disk");
         assert.ok(existsSync(sb.worktreePath("g", "broken")), "broken worktree missing on disk");
-        assert.equal(existsSync(sb.worktreePath("g", "later")), false);
+        assert.ok(existsSync(sb.worktreePath("g", "later")), "later worktree missing on disk");
     });
 
     it("destroy runs teardown for every persisted member, including the one whose setup failed", () => {

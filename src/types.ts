@@ -1,6 +1,10 @@
 export interface HookCmd {
     command: string;
     cwd?: "worktree" | "repo";
+    // Per-hook timeout override. Accepts "30s", "5m", "2h", "500ms" or a bare
+    // number (seconds). Falls back to RepoConfig.hooks.timeout, then to the
+    // top-level `hook_timeout`. No timeout if all three are absent.
+    timeout?: string | number;
 }
 
 // Hooks accept a bare string (defaults to cwd: worktree) or the full object form.
@@ -46,6 +50,10 @@ export interface RepoConfig {
         install?: HookSpec;
         setup?: HookSpec;
         teardown?: HookSpec;
+        // Default timeout for any phase of this repo, unless a per-hook
+        // `timeout` overrides it. Accepts "5m", "30s", "500ms", or a number
+        // (seconds).
+        timeout?: string | number;
     };
     exposes?: Record<string, ExposeSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
@@ -61,6 +69,10 @@ export interface RepoConfig {
     // holding it. Falls back to manifest-level `main_checkout_action`, then
     // to "switch".
     main_checkout_action?: MainCheckoutAction;
+    // Other repo keys whose `setup` must complete before this repo's `setup`
+    // begins. Exposes from those repos are visible in this repo's setup
+    // environment via the usual wiring. Cycles are rejected at validation.
+    depends_on?: string[];
 }
 
 export interface ToolConfig {
@@ -83,7 +95,21 @@ export interface MultreeConfig {
     // checked out in a repo's main source. Per-repo overrides win; if neither
     // is set, "switch" wins.
     main_checkout_action?: MainCheckoutAction;
+    // Default concurrency cap for `create`'s prime/install (and setup when
+    // parallel_setup is true). CLI `--jobs N` overrides. If neither is set,
+    // os.cpus().length is used.
+    jobs?: number;
+    // Run the `setup` phase in parallel up to `jobs` (respecting depends_on).
+    // Default false: setup runs serially because it often touches shared
+    // resources (ports, databases).
+    parallel_setup?: boolean;
+    // Manifest-level default hook timeout. Overridden by RepoConfig.hooks.timeout
+    // and individual HookCmd.timeout.
+    hook_timeout?: string | number;
 }
+
+export type PhaseName = "prime" | "install" | "setup";
+export type PhaseStatus = "done" | "failed";
 
 export interface MemberState {
     repo: string;
@@ -92,6 +118,9 @@ export interface MemberState {
     // field; consumers fall back to GroupState.branch when it's absent.
     branch?: string;
     exposes: Record<string, string>;
+    // Per-phase completion record. Populated as phases complete during
+    // `create`. Used by `--resume` to skip phases that already succeeded.
+    phase_status?: Partial<Record<PhaseName, PhaseStatus>>;
 }
 
 export interface GroupState {

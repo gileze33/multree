@@ -58,7 +58,9 @@ The repo only ships `multree.config.example.yaml`; your personal `~/multree.conf
 - `worktree_root` — parent for all groups. Each group becomes `<worktree_root>/<group-name>/`, with each repo checked out at `<worktree_root>/<group-name>/<basename-of-repo-path>/`.
 - `repos.<name>.path` — absolute path (supports `~/`) to the main checkout.
 - `repos.<name>.branch_base` — ref to branch from (default `origin/main`).
-- `repos.<name>.hooks.install/setup/teardown` — shell command run in the new worktree (or `cwd: repo` for the main checkout).
+- `repos.<name>.hooks.install/setup/teardown` — shell command run in the new worktree (or `cwd: repo` for the main checkout). Each hook can also be `{ command, cwd, timeout }`; `timeout` accepts `"5m"`, `"30s"`, `"500ms"`, or a bare number (seconds).
+- `repos.<name>.hooks.timeout` — default timeout for this repo's hooks; overridden by per-hook `timeout`.
+- `repos.<name>.depends_on` — list of other repo keys whose `setup` must complete before this repo's `setup` starts. Cycles are rejected at config load.
 - `repos.<name>.exposes.<key>` — read a value from the new worktree's env file after setup. Other repos reference it as `{<repo>.<key>}` in their `consumes.upsert`.
 - `repos.<name>.consumes.upsert` — env keys to write into the new worktree's env file. Values are templated against the exposes context.
 - `repos.<name>.defaults.<key>` — fallback value when the repo isn't part of the group (e.g. point frontends at default dev port `5000` when the api isn't selected).
@@ -67,6 +69,9 @@ The repo only ships `multree.config.example.yaml`; your personal `~/multree.conf
 - `repos.<name>.push` — set `false` to skip this repo in `multree push`. Defaults to `true`.
 - `update_strategy` (top-level) — default strategy used by `multree update` when neither a per-repo override nor `--strategy` is given. Defaults to `rebase`.
 - `main_checkout_action` (top-level, also per-repo) — what to do when a target branch is already checked out in a repo's main source. `switch` (default) moves the main checkout onto its `branch_base` (with any leading `origin/` stripped), `detach` leaves it on a detached HEAD, `error` refuses to act. Pre-flight aborts the whole `create` (no half-built groups) if any repo's plan can't be satisfied — including dirty main checkouts, branches held by other worktrees, or `--from` branches that don't exist.
+- `jobs` (top-level) — default concurrency cap for `create`'s prime/install phases (and `setup` when `parallel_setup` is set). Overridden by `--jobs N` on the CLI; defaults to the host's CPU count.
+- `parallel_setup` (top-level) — run the `setup` phase in parallel up to `jobs`, respecting `depends_on`. Defaults to `false` (setup runs serially because it often touches shared resources).
+- `hook_timeout` (top-level) — default timeout for any hook in any repo, overridden by per-repo `hooks.timeout` and per-hook `timeout`.
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
 
@@ -121,7 +126,8 @@ multree destroy feature-x
 
 ```
 multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
-multree add <name> <repo>
+                                                [--jobs <N>] [--plan] [--resume] [--verbose]
+multree add <name> <repo> [--verbose]
 multree remove <name> <repo>
 multree list
 multree show <name>
@@ -135,6 +141,8 @@ multree --help
 ```
 
 `create` makes a worktree per included repo, runs each `install` and `setup` hook, reads `exposes`, then upserts each `consumes` block. `--branch` names the new feature branch (defaults to `multree/<name>`). `--from <branch>` instead bases every member's worktree on an existing local or remote branch — useful for opening a colleague's PR locally as a group. `--from-<repo> <branch>` overrides the branch for a specific member (when branch names differ across repos).
+
+Hooks run phase-by-phase across all members: `prime_artifacts` → `install` → `setup`. The first two phases are parallelised up to `--jobs N` (default = CPU count); `setup` runs serially by default but can be parallelised via the manifest's `parallel_setup`. Inter-repo dependencies declared with `depends_on` force a member's `setup` to wait for its prerequisites' `setup` to complete. Per-phase progress is persisted to `.multree.json`; if a hook fails, re-run with `--resume` to pick up from the failed phase. `--plan` prints the schedule without executing. `--verbose` streams each hook's stdout/stderr live (prefixed with the repo key); the default captures output and only surfaces it on failure.
 
 `add` brings a new repo into an existing group (worktree + setup hook on the group's branch), then re-wires the whole group so its exposes reach existing consumers.
 

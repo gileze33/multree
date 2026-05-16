@@ -90,7 +90,8 @@ function help(): void {
 
 Usage:
   multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
-  multree add <name> <repo>
+                                                  [--jobs <N>] [--plan] [--resume] [--verbose]
+  multree add <name> <repo> [--verbose]
   multree remove <name> <repo>
   multree list
   multree show <name>
@@ -103,6 +104,14 @@ ${toolsLine}
 Manifest: $MULTREE_CONFIG, or ~/multree.config.yaml by default.
 State: each group's .multree.json inside its group folder under worktree_root.
 `);
+}
+
+function parseJobs(raw: string): number {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+        throw new Error(`--jobs must be a positive integer (got: ${raw})`);
+    }
+    return Math.floor(n);
 }
 
 function collectFromOverrides(
@@ -159,7 +168,18 @@ async function main(): Promise<void> {
                 const branch = typeof flags.branch === "string" ? flags.branch : undefined;
                 const from = typeof flags.from === "string" ? flags.from : undefined;
                 const branchesByRepo = collectFromOverrides(flags, include);
-                await createCommand({ name, include, branch, from, branchesByRepo });
+                const jobs = typeof flags.jobs === "string" ? parseJobs(flags.jobs) : undefined;
+                await createCommand({
+                    name,
+                    include,
+                    branch,
+                    from,
+                    branchesByRepo,
+                    jobs,
+                    plan: flags.plan === true,
+                    resume: flags.resume === true,
+                    verbose: flags.verbose === true,
+                });
                 break;
             }
             case "add": {
@@ -167,7 +187,7 @@ async function main(): Promise<void> {
                 if (!name || !repo) {
                     throw new Error("add requires <group-name> <repo>");
                 }
-                await addCommand(name, repo);
+                await addCommand(name, repo, { verbose: flags.verbose === true });
                 break;
             }
             case "remove": {
@@ -224,7 +244,7 @@ async function main(): Promise<void> {
                 if (!positional[0]) {
                     throw new Error("destroy requires a group name");
                 }
-                destroyCommand(positional[0]);
+                await destroyCommand(positional[0]);
                 break;
             case "help":
             case "--help":

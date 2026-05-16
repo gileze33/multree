@@ -40,6 +40,9 @@ export interface FakeRepoSpec {
     push?: boolean;
     updateStrategy?: "rebase" | "merge";
     mainCheckoutAction?: MainCheckoutAction;
+    dependsOn?: string[];
+    // Per-repo hook timeout (string or seconds).
+    hookTimeout?: string | number;
 }
 
 export interface SandboxOptions {
@@ -48,6 +51,9 @@ export interface SandboxOptions {
     // top-level defaults flow through when no per-repo override is set.
     updateStrategy?: "rebase" | "merge";
     mainCheckoutAction?: MainCheckoutAction;
+    jobs?: number;
+    parallelSetup?: boolean;
+    hookTimeout?: string | number;
 }
 
 export interface Sandbox {
@@ -152,6 +158,9 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         if (spec.teardown) {
             hooks.teardown = spec.teardown;
         }
+        if (spec.hookTimeout !== undefined) {
+            hooks.timeout = spec.hookTimeout;
+        }
 
         repos[spec.key] = {
             path: repoDir,
@@ -163,6 +172,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             push: spec.push,
             update_strategy: spec.updateStrategy,
             main_checkout_action: spec.mainCheckoutAction,
+            depends_on: spec.dependsOn,
         };
     }
 
@@ -172,6 +182,9 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         repos,
         update_strategy: opts.updateStrategy,
         main_checkout_action: opts.mainCheckoutAction,
+        jobs: opts.jobs,
+        parallel_setup: opts.parallelSetup,
+        hook_timeout: opts.hookTimeout,
     };
 
     const manifestPath = join(root, "multree.config.yaml");

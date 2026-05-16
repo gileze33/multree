@@ -43,6 +43,46 @@ function validate(cfg: MultreeConfig): void {
             throw new Error(`Repo "${name}" is missing required field: path`);
         }
     }
+    validateDependsOn(cfg);
+}
+
+function validateDependsOn(cfg: MultreeConfig): void {
+    const known = new Set(Object.keys(cfg.repos));
+    for (const [name, repo] of Object.entries(cfg.repos)) {
+        if (!repo.depends_on) {
+            continue;
+        }
+        for (const dep of repo.depends_on) {
+            if (!known.has(dep)) {
+                throw new Error(`Repo "${name}" depends_on unknown repo "${dep}"`);
+            }
+            if (dep === name) {
+                throw new Error(`Repo "${name}" depends_on itself`);
+            }
+        }
+    }
+    // Cycle detection via DFS over the full repo graph.
+    const color: Record<string, "white" | "gray" | "black"> = {};
+    for (const k of known) {
+        color[k] = "white";
+    }
+    function visit(key: string, stack: string[]): void {
+        if (color[key] === "black") {
+            return;
+        }
+        if (color[key] === "gray") {
+            const path = [...stack.slice(stack.indexOf(key)), key].join(" -> ");
+            throw new Error(`depends_on cycle: ${path}`);
+        }
+        color[key] = "gray";
+        for (const dep of cfg.repos[key].depends_on ?? []) {
+            visit(dep, [...stack, key]);
+        }
+        color[key] = "black";
+    }
+    for (const k of known) {
+        visit(k, []);
+    }
 }
 
 export function expandPath(p: string): string {

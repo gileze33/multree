@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "fs";
+import { cpus } from "os";
 import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
 import {
@@ -7,27 +8,38 @@ import {
     type MainCheckoutReleasePlan,
 } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
+import { formatDuration } from "../duration.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
-import { normalizeHook, runHook } from "../hooks.ts";
+import {
+    HookFailureError,
+    HookTimeoutError,
+    normalizeHook,
+    resolveHookTimeout,
+    runHook,
+} from "../hooks.ts";
+import { runScheduled, topoOrder } from "../scheduler.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
-import type { GroupState, MultreeConfig, RepoConfig } from "../types.ts";
+import type {
+    GroupState,
+    MemberState,
+    MultreeConfig,
+    PhaseName,
+    RepoConfig,
+} from "../types.ts";
 import { readExposes, wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
     name: string;
     include: string[];
     branch?: string;
-    // When set, base each member's worktree on this existing branch instead
-    // of cutting a fresh `multree/<group>` branch. The branch is expected to
-    // already exist locally or on the remote (we'll fetch first).
     from?: string;
-    // Per-repo override of the branch used for that member's worktree. Used
-    // when branch names differ across repos for the same logical work.
     branchesByRepo?: Record<string, string>;
+    jobs?: number;
+    plan?: boolean;
+    resume?: boolean;
+    verbose?: boolean;
 }
 
-// Pre-flight plan: everything the main loop needs so it doesn't have to
-// re-do discovery work after the worktrees start being created.
 interface MemberPlan {
     repoName: string;
     repoCfg: RepoConfig;
@@ -40,8 +52,15 @@ interface MemberPlan {
 export async function createCommand(args: CreateArgs): Promise<void> {
     const { config } = loadConfig();
 
-    if (loadGroup(config, args.name)) {
-        throw new Error(`Group "${args.name}" already exists. Destroy it first, or use a different name.`);
+    const existingGroup = loadGroup(config, args.name);
+    if (existingGroup && !args.resume) {
+        throw new Error(
+            `Group "${args.name}" already exists. Destroy it first, use a different name, ` +
+                `or pass --resume to continue from the last failed phase.`,
+        );
+    }
+    if (!existingGroup && args.resume) {
+        throw new Error(`--resume: no existing group named "${args.name}" to resume`);
     }
 
     for (const repo of args.include) {
@@ -62,71 +81,60 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         throw new Error("--from and --branch are mutually exclusive");
     }
 
-    const defaultBranch = args.from ?? args.branch ?? `multree/${args.name}`;
+    const defaultBranch = args.from ?? args.branch ?? existingGroup?.branch ?? `multree/${args.name}`;
     const dir = groupDir(config, args.name);
-    if (existsSync(dir)) {
+    if (!existingGroup && existsSync(dir)) {
         throw new Error(`Group directory already exists: ${dir}`);
     }
 
-    // ---- Pre-flight: validate every member before any side effects. ----
-    const plans = preflight(config, args, defaultBranch, dir);
+    const plans = preflight(config, args, defaultBranch, dir, existingGroup);
+    const jobs = resolveJobCount(args.jobs, config.jobs);
 
-    // ---- Execute. ----
+    // --plan: print the plan and exit before any side effects.
+    if (args.plan) {
+        printPlan(args.name, defaultBranch, plans, config, jobs);
+        return;
+    }
+
     mkdirSync(dir, { recursive: true });
 
-    const group: GroupState = {
+    const group: GroupState = existingGroup ?? {
         name: args.name,
         branch: defaultBranch,
         created_at: new Date().toISOString(),
         members: {},
     };
-
-    // Persist the empty group up front. Each member is then recorded
-    // immediately after its worktree exists on disk, BEFORE hooks run --
-    // so destroy can always find what to clean up even if a hook throws.
     saveGroup(config, group);
 
+    // Phase 0: serial worktree creation. Cheap, and avoids racing git on the
+    // same source repo. Members already on disk (from a prior failed run +
+    // --resume) are skipped here.
     for (const plan of plans) {
         const { repoName, repoCfg, repoPath, worktreePath, repoBranch } = plan;
-
+        if (group.members[repoName] && existsSync(worktreePath)) {
+            continue;
+        }
         if (plan.releasePlan) {
             executeMainCheckoutRelease(repoName, repoPath, repoBranch, plan.releasePlan);
         }
-
         console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
         addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
-
         group.members[repoName] = {
             repo: repoName,
             path: worktreePath,
             branch: repoBranch,
             exposes: {},
+            phase_status: {},
         };
         saveGroup(config, group);
-
-        if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
-            console.log(`[${repoName}] priming artifacts`);
-            primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
-        }
-
-        const installHook = normalizeHook(repoCfg.hooks?.install);
-        if (installHook) {
-            console.log(`[${repoName}] install hook`);
-            const cwd = installHook.cwd === "repo" ? repoPath : worktreePath;
-            runHook(installHook.command, cwd);
-        }
-
-        const setupHook = normalizeHook(repoCfg.hooks?.setup);
-        if (setupHook) {
-            console.log(`[${repoName}] setup hook`);
-            const cwd = setupHook.cwd === "repo" ? repoPath : worktreePath;
-            runHook(setupHook.command, cwd);
-        }
-
-        // Capture exposes after this member's setup completed successfully.
-        group.members[repoName].exposes = readExposes(worktreePath, repoCfg.exposes);
-        saveGroup(config, group);
     }
+
+    // Phases prime/install/setup. Each runs across all members; prime/install
+    // are independent and bounded by `jobs`. Setup respects depends_on and
+    // runs serially unless `parallel_setup` is set.
+    await runPhase(config, group, plans, "prime", jobs, args.verbose ?? false);
+    await runPhase(config, group, plans, "install", jobs, args.verbose ?? false);
+    await runPhase(config, group, plans, "setup", jobs, args.verbose ?? false);
 
     console.log("");
     wireGroup(config, group);
@@ -143,6 +151,206 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     }
 }
 
+function resolveJobCount(cliJobs: number | undefined, configJobs: number | undefined): number {
+    if (cliJobs !== undefined) {
+        return Math.max(1, cliJobs);
+    }
+    if (configJobs !== undefined) {
+        return Math.max(1, configJobs);
+    }
+    return Math.max(1, cpus().length);
+}
+
+async function runPhase(
+    config: MultreeConfig,
+    group: GroupState,
+    plans: MemberPlan[],
+    phase: PhaseName,
+    jobs: number,
+    verbose: boolean,
+): Promise<void> {
+    const planByName = new Map(plans.map(p => [p.repoName, p]));
+    const repoNames = plans.map(p => p.repoName);
+    const phaseJobs = phase === "setup" && !config.parallel_setup ? 1 : jobs;
+    const depsOf: Record<string, string[]> = {};
+    if (phase === "setup") {
+        for (const p of plans) {
+            const deps = (p.repoCfg.depends_on ?? []).filter(d => repoNames.includes(d));
+            if (deps.length > 0) {
+                depsOf[p.repoName] = deps;
+            }
+        }
+    }
+
+    const work = async (repoName: string): Promise<void> => {
+        const plan = planByName.get(repoName);
+        if (!plan) {
+            return;
+        }
+        const member = group.members[repoName];
+        if (!member) {
+            throw new Error(`internal: member ${repoName} missing from state`);
+        }
+        if (member.phase_status?.[phase] === "done") {
+            console.log(`[${repoName}] ${phase}: skipped (already done)`);
+            return;
+        }
+        try {
+            await executePhase(config, plan, member, phase, verbose);
+            recordPhase(group, repoName, phase, "done");
+        } catch (err) {
+            recordPhase(group, repoName, phase, "failed");
+            throw err;
+        } finally {
+            saveGroup(config, group);
+        }
+    };
+
+    const results = await runScheduled(repoNames, work, { jobs: phaseJobs, depsOf });
+    const failures = results.filter(r => r.outcome === "failed");
+    const skipped = results.filter(r => r.outcome === "skipped");
+    if (failures.length === 0 && skipped.length === 0) {
+        return;
+    }
+    const msg = [`${phase} phase failed:`];
+    for (const f of failures) {
+        msg.push(formatFailureLine(f.key, f.error));
+    }
+    for (const s of skipped) {
+        msg.push(`  [${s.key}] skipped (dependency failed)`);
+    }
+    throw new Error(msg.join("\n"));
+}
+
+function formatFailureLine(repoName: string, err: Error | undefined): string {
+    if (!err) {
+        return `  [${repoName}] failed`;
+    }
+    if (err instanceof HookTimeoutError) {
+        return `  [${repoName}] timed out after ${err.timeoutMs}ms`;
+    }
+    if (err instanceof HookFailureError) {
+        return `  [${repoName}] ${err.message}`;
+    }
+    return `  [${repoName}] ${err.message}`;
+}
+
+async function executePhase(
+    config: MultreeConfig,
+    plan: MemberPlan,
+    member: MemberState,
+    phase: PhaseName,
+    verbose: boolean,
+): Promise<void> {
+    const { repoName, repoCfg, repoPath, worktreePath } = plan;
+    if (phase === "prime") {
+        if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
+            console.log(`[${repoName}] priming artifacts`);
+            primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
+        }
+        return;
+    }
+    const hookSpec = phase === "install" ? repoCfg.hooks?.install : repoCfg.hooks?.setup;
+    const hook = normalizeHook(hookSpec);
+    if (!hook) {
+        return;
+    }
+    const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
+    const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
+    console.log(`[${repoName}] ${phase} hook${timeoutMs ? ` (timeout: ${timeoutMs}ms)` : ""}`);
+    if (!verbose) {
+        console.log(`  $ (${cwd}) ${hook.command}`);
+    }
+    try {
+        const r = await runHook(hook.command, cwd, {
+            timeoutMs,
+            verbose,
+            label: verbose ? repoName : undefined,
+        });
+        console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
+    } catch (err) {
+        if (!verbose && (err instanceof HookFailureError || err instanceof HookTimeoutError)) {
+            // Surface captured output on failure when we weren't streaming.
+            if (err.output) {
+                process.stderr.write(err.output);
+                if (!err.output.endsWith("\n")) {
+                    process.stderr.write("\n");
+                }
+            }
+        }
+        throw err;
+    }
+    if (phase === "setup") {
+        member.exposes = readExposes(worktreePath, repoCfg.exposes);
+    }
+}
+
+function recordPhase(
+    group: GroupState,
+    repoName: string,
+    phase: PhaseName,
+    status: "done" | "failed",
+): void {
+    const member = group.members[repoName];
+    if (!member) {
+        return;
+    }
+    if (!member.phase_status) {
+        member.phase_status = {};
+    }
+    member.phase_status[phase] = status;
+}
+
+function printPlan(
+    name: string,
+    branch: string,
+    plans: MemberPlan[],
+    config: MultreeConfig,
+    jobs: number,
+): void {
+    console.log(`Plan for create "${name}" on branch "${branch}":`);
+    console.log(`  jobs=${jobs}, parallel_setup=${config.parallel_setup ? "true" : "false"}`);
+    console.log("");
+    for (const p of plans) {
+        console.log(`  [${p.repoName}] worktree -> ${p.worktreePath} (branch: ${p.repoBranch})`);
+    }
+    console.log("");
+    console.log(`Phase prime (parallel up to ${jobs}):`);
+    for (const p of plans) {
+        const n = p.repoCfg.prime_artifacts?.length ?? 0;
+        console.log(`  [${p.repoName}] ${n} artifact spec(s)`);
+    }
+    console.log("");
+    console.log(`Phase install (parallel up to ${jobs}):`);
+    for (const p of plans) {
+        const hook = normalizeHook(p.repoCfg.hooks?.install);
+        console.log(`  [${p.repoName}] ${hook ? hook.command : "(none)"}`);
+    }
+    console.log("");
+    const setupJobs = config.parallel_setup ? jobs : 1;
+    const repoNames = plans.map(p => p.repoName);
+    const depsOf: Record<string, string[]> = {};
+    for (const p of plans) {
+        const deps = (p.repoCfg.depends_on ?? []).filter(d => repoNames.includes(d));
+        if (deps.length > 0) {
+            depsOf[p.repoName] = deps;
+        }
+    }
+    const setupOrder = topoOrder(repoNames, depsOf);
+    console.log(
+        `Phase setup (${config.parallel_setup ? `parallel up to ${setupJobs}` : "serial"}, ` +
+            `topo order from depends_on):`,
+    );
+    for (const repoName of setupOrder) {
+        const p = plans.find(x => x.repoName === repoName)!;
+        const hook = normalizeHook(p.repoCfg.hooks?.setup);
+        const deps = depsOf[repoName] ? ` (after: ${depsOf[repoName].join(", ")})` : "";
+        console.log(`  [${repoName}] ${hook ? hook.command : "(none)"}${deps}`);
+    }
+    console.log("");
+    console.log("Then: wire env files.");
+}
+
 // Runs every check we can run without touching worktrees. Fetches each repo
 // up-front (the network cost we'd pay anyway) so branch-existence checks see
 // fresh remote-tracking refs. Throws a single aggregated error if any plan
@@ -152,6 +360,7 @@ function preflight(
     args: CreateArgs,
     defaultBranch: string,
     dir: string,
+    existing: GroupState | null,
 ): MemberPlan[] {
     const plans: MemberPlan[] = [];
     const errors: string[] = [];
@@ -165,6 +374,7 @@ function preflight(
         console.log(`\n[${repoName}] git fetch`);
         fetchRepo(repoPath);
 
+        const memberAlreadyExists = existing?.members[repoName] && existsSync(worktreePath);
         const fromBranchRequested = args.from !== undefined
             || args.branchesByRepo?.[repoName] !== undefined;
         const localExists = branchExists(repoPath, repoBranch);
@@ -177,15 +387,19 @@ function preflight(
             continue;
         }
 
-        if (existsSync(worktreePath)) {
+        if (!memberAlreadyExists && existsSync(worktreePath)) {
             errors.push(`[${repoName}] worktree path already exists: ${worktreePath}`);
             continue;
         }
 
-        const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
-        if (release.error) {
-            errors.push(release.error);
-            continue;
+        let releasePlan: MainCheckoutReleasePlan | undefined;
+        if (!memberAlreadyExists) {
+            const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
+            if (release.error) {
+                errors.push(release.error);
+                continue;
+            }
+            releasePlan = release.plan;
         }
 
         plans.push({
@@ -194,7 +408,7 @@ function preflight(
             repoPath,
             worktreePath,
             repoBranch,
-            releasePlan: release.plan,
+            releasePlan,
         });
     }
 

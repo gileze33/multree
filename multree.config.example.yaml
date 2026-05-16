@@ -25,6 +25,21 @@ worktree_root: ~/dev/worktree
 # "error" refuses to act. Per-repo overrides allowed.
 # main_checkout_action: detach
 
+# Concurrency cap for the prime / install phases of `multree create` (and
+# the setup phase when parallel_setup is true). CLI `--jobs N` overrides
+# this; default is the host's CPU count.
+# jobs: 4
+
+# Run the setup phase in parallel up to `jobs`, respecting depends_on.
+# Default false: setup runs serially because it often touches shared
+# resources (ports, databases). Flip on if your setup hooks are isolated.
+# parallel_setup: true
+
+# Manifest-level default hook timeout. Overridden by `repos.<name>.hooks.timeout`
+# and individual hook objects' `timeout`. Accepts "5m", "30s", "500ms", or a
+# bare number (seconds). No timeout if unset.
+# hook_timeout: 10m
+
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen
     # worktree. `open_in` is a preference chain -- `$root` is the group folder,
@@ -77,6 +92,13 @@ repos:
         path: ~/dev/repo-b
         hooks:
             install: "pnpm install"
+            # Per-hook timeout overrides repo-level / manifest-level defaults.
+            # setup:
+            #     command: "pnpm run setup"
+            #     timeout: 90s
+        # frontend's setup waits for api's setup to finish (so api.port is
+        # resolved before the templated value below is written).
+        # depends_on: [api]
         # Write templated env vars into the worktree's env file, inside a block
         # bracketed by `# >>> multree-managed: <group> >>>` / `# <<< ... <<<`
         # so `rewire` is idempotent.

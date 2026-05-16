@@ -86,4 +86,49 @@ describe("loadConfig", () => {
         assert.equal(config.version, 1);
         assert.equal(config.repos.api.path, "/tmp/api");
     });
+
+    it("rejects depends_on pointing at an unknown repo", () => {
+        const p = join(dir, "unknown-dep.yaml");
+        writeFileSync(
+            p,
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\n  frontend:\n    path: /tmp/frontend\n    depends_on: [ghost]\n",
+        );
+        process.env.MULTREE_CONFIG = p;
+        assert.throws(() => loadConfig(), /depends_on unknown repo "ghost"/);
+    });
+
+    it("rejects depends_on pointing at the repo itself", () => {
+        const p = join(dir, "self-dep.yaml");
+        writeFileSync(
+            p,
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\n    depends_on: [api]\n",
+        );
+        process.env.MULTREE_CONFIG = p;
+        assert.throws(() => loadConfig(), /depends_on itself/);
+    });
+
+    it("rejects a depends_on cycle", () => {
+        const p = join(dir, "cycle.yaml");
+        writeFileSync(
+            p,
+            "version: 1\nrepos:\n" +
+                "  a:\n    path: /tmp/a\n    depends_on: [b]\n" +
+                "  b:\n    path: /tmp/b\n    depends_on: [a]\n",
+        );
+        process.env.MULTREE_CONFIG = p;
+        assert.throws(() => loadConfig(), /depends_on cycle/);
+    });
+
+    it("accepts a valid depends_on graph", () => {
+        const p = join(dir, "deps.yaml");
+        writeFileSync(
+            p,
+            "version: 1\nrepos:\n" +
+                "  api:\n    path: /tmp/api\n" +
+                "  frontend:\n    path: /tmp/frontend\n    depends_on: [api]\n",
+        );
+        process.env.MULTREE_CONFIG = p;
+        const { config } = loadConfig();
+        assert.deepEqual(config.repos.frontend.depends_on, ["api"]);
+    });
 });

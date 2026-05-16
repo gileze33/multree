@@ -3,12 +3,27 @@ import { basename, join } from "path";
 import { primeArtifacts } from "../artifacts.ts";
 import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
+import { formatDuration } from "../duration.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
-import { normalizeHook, runHook } from "../hooks.ts";
+import {
+    HookFailureError,
+    HookTimeoutError,
+    normalizeHook,
+    resolveHookTimeout,
+    runHook,
+} from "../hooks.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import { wireGroup } from "../wiring.ts";
 
-export async function addCommand(groupName: string, repoName: string): Promise<void> {
+interface AddOptions {
+    verbose?: boolean;
+}
+
+export async function addCommand(
+    groupName: string,
+    repoName: string,
+    opts: AddOptions = {},
+): Promise<void> {
     const { config } = loadConfig();
     const group = loadGroup(config, groupName);
     if (!group) {
@@ -36,9 +51,6 @@ export async function addCommand(groupName: string, repoName: string): Promise<v
 
     const repoBranch = group.branch;
 
-    // Decide up-front whether we can take this branch (it might be held by
-    // the main checkout or another worktree). Bail before any side effects
-    // if not.
     const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
     if (release.error) {
         throw new Error(release.error);
@@ -50,8 +62,6 @@ export async function addCommand(groupName: string, repoName: string): Promise<v
     console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
     addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
 
-    // Persist the new member before hooks run so destroy can recover the
-    // worktree even if a hook throws.
     group.members[repoName] = {
         repo: repoName,
         path: worktreePath,
@@ -65,18 +75,35 @@ export async function addCommand(groupName: string, repoName: string): Promise<v
         primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
     }
 
-    const installHook = normalizeHook(repoCfg.hooks?.install);
-    if (installHook) {
-        console.log(`[${repoName}] install hook`);
-        const cwd = installHook.cwd === "repo" ? repoPath : worktreePath;
-        runHook(installHook.command, cwd);
-    }
-
-    const setupHook = normalizeHook(repoCfg.hooks?.setup);
-    if (setupHook) {
-        console.log(`[${repoName}] setup hook`);
-        const cwd = setupHook.cwd === "repo" ? repoPath : worktreePath;
-        runHook(setupHook.command, cwd);
+    for (const phase of ["install", "setup"] as const) {
+        const hook = normalizeHook(repoCfg.hooks?.[phase]);
+        if (!hook) {
+            continue;
+        }
+        const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
+        const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
+        console.log(`[${repoName}] ${phase} hook${timeoutMs ? ` (timeout: ${timeoutMs}ms)` : ""}`);
+        if (!opts.verbose) {
+            console.log(`  $ (${cwd}) ${hook.command}`);
+        }
+        try {
+            const r = await runHook(hook.command, cwd, {
+                timeoutMs,
+                verbose: opts.verbose,
+                label: opts.verbose ? repoName : undefined,
+            });
+            console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
+        } catch (err) {
+            if (!opts.verbose && (err instanceof HookFailureError || err instanceof HookTimeoutError)) {
+                if (err.output) {
+                    process.stderr.write(err.output);
+                    if (!err.output.endsWith("\n")) {
+                        process.stderr.write("\n");
+                    }
+                }
+            }
+            throw err;
+        }
     }
 
     // Re-wire across the whole group: the new repo's exposes (if any) may
