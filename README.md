@@ -152,6 +152,24 @@ multree --help
 
 Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.g. `multree code feature-x` opens the group in your editor.
 
+## Update notifications
+
+multree checks the npm registry once every 24 hours for a newer published version and, on the next run, prints a one-line notice to stderr if you're behind:
+
+```
+[multree] new version available: 0.1.1 → 0.2.0 (run: npm i -g multree-cli@latest)
+```
+
+The check is **notify-only** — multree never auto-updates itself. The actual registry fetch happens in a detached background process so it never adds latency to your command. The result is cached in `$XDG_CACHE_HOME/multree/version-check.json` (or `~/.cache/multree/version-check.json`).
+
+The notice is suppressed when any of the following is true:
+
+- `CI` env var is set (truthy)
+- stderr is not a TTY (output is being piped)
+- `MULTREE_NO_UPDATE_CHECK=1` is set
+
+To disable update checks permanently, add `export MULTREE_NO_UPDATE_CHECK=1` to your shell profile.
+
 ## Development
 
 ```bash

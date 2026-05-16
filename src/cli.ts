@@ -15,6 +15,7 @@ import { updateCommand } from "./commands/update.ts";
 import { loadConfig } from "./config.ts";
 import { toolCommand } from "./tools.ts";
 import type { UpdateStrategy } from "./types.ts";
+import { kickBackgroundCheck, notifyIfNewer, runUpdateCheck } from "./update-check.ts";
 
 const BUILTIN_COMMANDS = new Set([
     "create",
@@ -130,6 +131,17 @@ function collectFromOverrides(
 async function main(): Promise<void> {
     const { cmd, positional, flags } = parseArgs();
 
+    // Hidden subcommand used by the detached background process. Never emits
+    // output and never recurses into the user-facing notify/kick flow.
+    if (cmd === "__update-check") {
+        await runUpdateCheck();
+        return;
+    }
+
+    const version = readVersion();
+    notifyIfNewer(version);
+    kickBackgroundCheck();
+
     try {
         switch (cmd) {
             case "create": {
@@ -221,7 +233,7 @@ async function main(): Promise<void> {
                 break;
             case "--version":
             case "-v":
-                console.log(readVersion());
+                console.log(version);
                 break;
             default: {
                 // Fall through to tool dispatch.
