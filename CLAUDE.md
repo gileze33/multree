@@ -72,6 +72,7 @@ multree.config.example.yaml  # committed example manifest; user copies it to ~/m
 
 ## Working conventions
 
+- multree is a generic, repo-agnostic orchestrator. Keep `src/` and `tests/` free of names, paths, ports, hostnames, or domain language borrowed from any particular project, company, or product. Tests should use neutral fixture names (`api`, `frontend`, `monorepo-client`, `north`/`south` for regions) — never the name of a real-world repo, service, or organisation. Project-specific behaviour belongs in the user's manifest, not the source or the test suite.
 - Strict TS, ES2022, `module: ESNext`, `moduleResolution: Bundler`, `allowImportingTsExtensions: true`. All intra-`src` imports use `.ts` extensions — preserve this.
 - One concern per file. New subcommands go under `src/commands/<name>.ts` and are wired into `BUILTIN_COMMANDS` and the switch in `src/cli.ts`.
 - Side-effecting filesystem / shell logic lives in `git.ts`, `hooks.ts`, `artifacts.ts`, `env.ts`. Keep `commands/*.ts` as orchestrators that call these — don't inline new `execSync` or `fs` calls into commands.

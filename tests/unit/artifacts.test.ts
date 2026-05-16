@@ -75,6 +75,25 @@ describe("primeArtifacts (copy strategy)", () => {
     it("rejects a spec with both 'path' and 'find'", () => {
         assert.throws(() => primeArtifacts(src, dst, [{ path: "a", find: "b" }]), /either 'path' or 'find'/);
     });
+
+    it("rejects a spec with neither 'path' nor 'find'", () => {
+        assert.throws(() => primeArtifacts(src, dst, [{ strategy: "copy" }]), /must specify 'path' or 'find'/);
+    });
+
+    it("is a no-op when 'find' matches nothing in the source", () => {
+        mkdirSync(join(src, "irrelevant"), { recursive: true });
+        primeArtifacts(src, dst, [{ find: "node_modules", strategy: "copy" }]);
+        assert.equal(existsSync(join(dst, "node_modules")), false);
+    });
+
+    it("'find' keeps each match's original relative location", () => {
+        mkdirSync(join(src, "deep", "nested", "node_modules"), { recursive: true });
+        writeFileSync(join(src, "deep", "nested", "node_modules", "marker"), "x");
+
+        primeArtifacts(src, dst, [{ find: "node_modules", strategy: "copy" }]);
+        assert.equal(existsSync(join(dst, "deep", "nested", "node_modules", "marker")), true);
+        assert.equal(existsSync(join(dst, "node_modules")), false);
+    });
 });
 
 function readDirSafe(p: string): string[] {
