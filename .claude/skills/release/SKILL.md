@@ -19,17 +19,6 @@ Before doing anything, verify all of:
 
 If any precondition fails, stop and tell the user what's wrong. Do not try to "fix" by stashing, committing, or rebasing on the user's behalf.
 
-## Bootstrap caveat (first publish only)
-
-OIDC trusted publishing on npm requires the package to already exist in the registry, and a Trusted Publisher to be configured on npmjs.com pointing at this repo's `release.yml`.
-
-Before running this skill for the first time, confirm with the user that:
-
-- They have published `multree` to npm manually at least once from their laptop, having `npm login`-ed first. The bootstrap publish **must drop `--provenance`**: provenance attestation requires an OIDC-capable CI provider (GitHub Actions, GitLab CI, etc), and a local machine has none. Use `pnpm publish --access public --no-git-checks`. The package gets provenance from the first CI-driven release onwards (v0.1.1+), not from the bootstrap.
-- The Trusted Publisher is configured on npmjs.com for the `multree` package against `gileze33/multree` and workflow `release.yml`.
-
-If either is missing, the tag push will succeed but the workflow's publish step will fail. Better to surface this up front.
-
 ## Picking the bump
 
 Ask the user which bump to apply unless they've already specified one:
