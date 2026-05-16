@@ -1,7 +1,10 @@
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
-import type { GroupState, MultreeConfig } from "../../src/types.ts";
-import { buildContext, resolveTemplate } from "../../src/wiring.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import type { ExposeSpec, GroupState, MultreeConfig } from "../../src/types.ts";
+import { buildContext, readExposes, resolveTemplate } from "../../src/wiring.ts";
 
 describe("resolveTemplate", () => {
     it("substitutes {repo.key} from context", () => {
@@ -65,5 +68,47 @@ describe("buildContext", () => {
         const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
         const ctx = buildContext(config, group);
         assert.equal(ctx.rn, undefined);
+    });
+
+    it("stringifies numeric defaults", () => {
+        const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
+        const ctx = buildContext(config, group);
+        assert.equal(typeof ctx.api?.port, "string");
+        assert.equal(ctx.api?.port, "5000");
+    });
+});
+
+describe("readExposes", () => {
+    let dir: string;
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), "multree-exposes-"));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("returns the exposed value when the key is present", () => {
+        writeFileSync(join(dir, ".env.local"), "API_PORT=5234\n");
+        const spec: Record<string, ExposeSpec> = {
+            port: { type: "env_file", file: ".env.local", key: "API_PORT" },
+        };
+        assert.deepEqual(readExposes(dir, spec), { port: "5234" });
+    });
+
+    it("omits keys that are not present in the env file (consumer falls back to defaults)", () => {
+        writeFileSync(join(dir, ".env.local"), "other=1\n");
+        const spec: Record<string, ExposeSpec> = {
+            port: { type: "env_file", file: ".env.local", key: "API_PORT" },
+        };
+        assert.deepEqual(readExposes(dir, spec), {});
+    });
+
+    it("returns {} when no exposes are declared", () => {
+        assert.deepEqual(readExposes(dir, undefined), {});
+    });
+
+    it("rejects unsupported expose types", () => {
+        const spec = {
+            port: { type: "stdout_capture", file: "x", key: "y" },
+        } as unknown as Record<string, ExposeSpec>;
+        assert.throws(() => readExposes(dir, spec), /Unsupported expose type/);
     });
 });

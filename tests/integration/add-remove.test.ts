@@ -14,10 +14,10 @@ describe("add and remove", () => {
                 {
                     key: "api",
                     dirname: "fake-api",
-                    setup: trace("api:setup", `echo "server__port=5234" > .env.local`),
+                    setup: trace("api:setup", `echo "API_PORT=5234" > .env.local`),
                     teardown: trace("api:teardown"),
                     exposes: {
-                        port: { type: "env_file", file: ".env.local", key: "server__port" },
+                        port: { type: "env_file", file: ".env.local", key: "API_PORT" },
                     },
                     defaults: { port: 5000 },
                 },

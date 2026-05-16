@@ -14,9 +14,9 @@ describe("rewire", () => {
                 {
                     key: "api",
                     dirname: "fake-api",
-                    setup: trace("api:setup", `echo "server__port=5234" > .env.local`),
+                    setup: trace("api:setup", `echo "API_PORT=5234" > .env.local`),
                     exposes: {
-                        port: { type: "env_file", file: ".env.local", key: "server__port" },
+                        port: { type: "env_file", file: ".env.local", key: "API_PORT" },
                     },
                     defaults: { port: 5000 },
                 },
@@ -53,7 +53,7 @@ describe("rewire", () => {
         runMultree(sb, ["create", "g", "--include", "api,frontend"]);
 
         // Simulate the api repo updating its port (e.g. dev changed config).
-        writeFileSync(join(sb.worktreePath("g", "api"), ".env.local"), "server__port=5999\n");
+        writeFileSync(join(sb.worktreePath("g", "api"), ".env.local"), "API_PORT=5999\n");
 
         const r = runMultree(sb, ["rewire", "g"]);
         assert.equal(r.status, 0, r.stderr);

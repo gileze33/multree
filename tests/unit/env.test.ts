@@ -97,6 +97,46 @@ describe("upsertManagedBlock", () => {
         assert.match(content, /API_URL=for-a/);
         assert.match(content, /API_URL=for-b/);
     });
+
+    it("overwrites user edits made inside the managed block", () => {
+        const f = join(dir, ".env");
+        upsertManagedBlock(f, { API_URL: "managed" }, "g");
+        const tampered = readFileSync(f, "utf-8").replace("API_URL=managed", "API_URL=hand-edited");
+        writeFileSync(f, tampered);
+
+        upsertManagedBlock(f, { API_URL: "managed" }, "g");
+        const after = readFileSync(f, "utf-8");
+        assert.match(after, /API_URL=managed/);
+        assert.doesNotMatch(after, /API_URL=hand-edited/);
+    });
+
+    it("preserves user content added after the managed block", () => {
+        const f = join(dir, ".env");
+        upsertManagedBlock(f, { API_URL: "x" }, "g");
+        const original = readFileSync(f, "utf-8");
+        writeFileSync(f, `${original}\nPERSONAL=mine\n`);
+
+        upsertManagedBlock(f, { API_URL: "y" }, "g");
+        const after = readFileSync(f, "utf-8");
+        assert.match(after, /PERSONAL=mine/);
+        assert.match(after, /API_URL=y/);
+    });
+
+    it("writes no block when updates is empty", () => {
+        const f = join(dir, ".env");
+        writeFileSync(f, "USER=keep\n");
+        upsertManagedBlock(f, {}, "g");
+        const content = readFileSync(f, "utf-8");
+        assert.match(content, /USER=keep/);
+        assert.doesNotMatch(content, /multree-managed/);
+    });
+
+    it("preserves values that contain '=' characters", () => {
+        const f = join(dir, ".env");
+        upsertManagedBlock(f, { TOKEN: "a=b=c" }, "g");
+        const content = readFileSync(f, "utf-8");
+        assert.match(content, /TOKEN=a=b=c/);
+    });
 });
 
 describe("removeManagedBlock", () => {

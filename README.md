@@ -57,63 +57,26 @@ Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree
 
 ## Worked example
 
-Given this slice of `~/multree.config.yaml`:
-
-```yaml
-version: 1
-worktree_root: ~/dev/worktree
-
-repos:
-    api:
-        path: ~/dev/my-api
-        hooks:
-            install: "pnpm install"
-            setup: "pnpm worktree setup"   # writes server__port into .env.local
-            teardown: "pnpm worktree teardown"
-        exposes:
-            port:
-                type: env_file
-                file: .env.local
-                key: server__port
-        defaults:
-            port: 5000
-        prime_artifacts:
-            - find: node_modules
-              strategy: reflink
-
-    frontend:
-        path: ~/dev/my-frontend
-        hooks:
-            install: "pnpm install"
-        consumes:
-            file: .env.local
-            upsert:
-                API_URL: "http://localhost:{api.port}"
-        prime_artifacts:
-            - find: node_modules
-              strategy: reflink
-```
-
-Then:
+With an `api` and `frontend` repo declared in your manifest (see [`multree.config.example.yaml`](./multree.config.example.yaml) for the full shape, including `exposes`/`consumes` wiring), run:
 
 ```bash
 multree create feature-x --include api,frontend
 ```
 
-…produces:
+…and you get:
 
 ```
 ~/dev/worktree/feature-x/
 ├── .multree.json          # group state
-├── my-api/                # worktree of ~/dev/my-api on branch feature-x
+├── api/                   # worktree of your api repo on branch feature-x
 │   ├── node_modules/      # APFS-cloned from the main checkout
-│   └── .env.local         # contains server__port=51234 after setup hook
-└── my-frontend/           # worktree of ~/dev/my-frontend on branch feature-x
+│   └── .env.local         # contains API_PORT=51234 after the setup hook
+└── frontend/              # worktree of your frontend repo on branch feature-x
     ├── node_modules/
     └── .env.local         # contains a managed block with API_URL=http://localhost:51234
 ```
 
-`feature-x/my-frontend/.env.local` looks like:
+`feature-x/frontend/.env.local` looks like:
 
 ```dotenv
 # >>> multree-managed: feature-x >>>

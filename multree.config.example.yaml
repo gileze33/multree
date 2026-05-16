@@ -38,16 +38,16 @@ repos:
             # Runs in the new worktree after `prime_artifacts`. Optional.
             install: "pnpm install"
             # Runs after install. Optional. Use this to set up DB / pick ports / etc.
-            setup: "pnpm worktree setup"
+            setup: "pnpm run setup"
             # Runs on remove/destroy. Optional.
-            teardown: "pnpm worktree teardown"
+            teardown: "pnpm run teardown"
         # Read values from this worktree's env file after setup; other repos
         # reference them as {<repo>.<key>} in their consumes block.
         exposes:
             port:
                 type: env_file
                 file: .env.local
-                key: server__port
+                key: API_PORT
         # Fallback values used when this repo is NOT included in the group --
         # e.g. point frontends at the default dev port.
         defaults:
