@@ -3,6 +3,7 @@ import {
     aheadBehind,
     currentBranch,
     fetchRepo,
+    isDetached,
     isDirty,
     lastCommitSummary,
     refExists,
@@ -45,6 +46,7 @@ export function statusCommand(args: StatusArgs): void {
         }
 
         const branch = currentBranch(member.path) ?? member.branch ?? "?";
+        const detachedNote = isDetached(member.path) ? " (detached)" : "";
         const baseRef = resolveBranchBase(repoCfg);
         const baseAvailable = refExists(member.path, baseRef);
         const ab = baseAvailable ? aheadBehind(member.path, baseRef) : null;
@@ -56,7 +58,7 @@ export function statusCommand(args: StatusArgs): void {
             : baseAvailable
                 ? "?"
                 : "(base ref unavailable)";
-        console.log(`    branch: ${branch}`);
+        console.log(`    branch: ${branch}${detachedNote}`);
         console.log(`    base: ${baseRef} (${baseLine})`);
         console.log(`    tree: ${dirty ? "dirty" : "clean"}`);
         if (last) {

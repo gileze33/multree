@@ -120,15 +120,37 @@ export function lastCommitSummary(worktreePath: string): CommitSummary | null {
     }
 }
 
+// Returns the branch name when HEAD is a symbolic ref, or null when HEAD is
+// detached (or the worktree is unreadable). symbolic-ref is the right
+// primitive here: rev-parse --abbrev-ref returns the literal "HEAD" on a
+// detached worktree, which silently defeats the `?? member.branch` fallback
+// in push/status.
 export function currentBranch(worktreePath: string): string | null {
     if (!existsSync(worktreePath)) {
         return null;
     }
     try {
-        const out = gitCapture(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+        const out = gitCapture(worktreePath, [
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+        ]).trim();
         return out || null;
     } catch {
         return null;
+    }
+}
+
+export function isDetached(worktreePath: string): boolean {
+    if (!existsSync(worktreePath)) {
+        return false;
+    }
+    try {
+        gitSilent(worktreePath, ["symbolic-ref", "--quiet", "HEAD"]);
+        return false;
+    } catch {
+        return true;
     }
 }
 

@@ -121,4 +121,29 @@ describe("create with prime_artifacts", () => {
         const copiedCache = join(wt, "packages", "a", "build-cache", "marker");
         assert.equal(readFileSync(copiedCache, "utf-8"), "cache-a");
     });
+
+    // primeArtifacts defaults to strategy: "copy" when the field is unset.
+    // Unit tests cover this on the helper directly; this pins the manifest
+    // round-trip so an accidental upstream rename of the default would break.
+    it("defaults to the copy strategy when none is set on a spec", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ path: "out-dir" /* no strategy */ }],
+                },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        mkdirSync(join(repo, "out-dir"), { recursive: true });
+        writeFileSync(join(repo, "out-dir", "marker"), "default-strategy");
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const primed = join(sb.worktreePath("g", "api"), "out-dir", "marker");
+        assert.equal(readFileSync(primed, "utf-8"), "default-strategy");
+    });
 });

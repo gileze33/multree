@@ -87,6 +87,60 @@ describe("add and remove", () => {
         assert.match(r.stderr, /not in group/);
     });
 
+    it("rejects adding a repo that isn't in the manifest", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        const r = runMultree(sb, ["add", "g", "phantom"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Unknown repo "phantom"/);
+    });
+
+    it("errors when the group does not exist (add)", () => {
+        const r = runMultree(sb, ["add", "ghost", "api"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Group not found: ghost/);
+    });
+
+    it("errors when the group does not exist (remove)", () => {
+        const r = runMultree(sb, ["remove", "ghost", "api"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Group not found: ghost/);
+    });
+
+    // Failing install must surface as a non-zero exit, but the worktree and
+    // state created up to that point should remain on disk so the user can
+    // either retry (after fixing the install) or clean up with `destroy`.
+    it("propagates an install failure but leaves the worktree and state in place", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api", setup: trace("api:setup") },
+                {
+                    key: "frontend",
+                    dirname: "fake-frontend",
+                    install: traceThenFail("frontend:install"),
+                    setup: trace("frontend:setup"),
+                },
+            ],
+        });
+        runMultree(sb, ["create", "g", "--include", "api"]);
+
+        const r = runMultree(sb, ["add", "g", "frontend"]);
+        assert.notEqual(r.status, 0);
+        assert.ok(sb.trace().includes("frontend:install"));
+        // Setup is downstream of install; it must not have run.
+        assert.equal(sb.trace().filter(e => e === "frontend:setup").length, 0);
+
+        // Worktree and state persisted from before the throw, so destroy can
+        // tidy up and a retry sees "already in group" rather than silently
+        // duplicating work.
+        assert.ok(existsSync(sb.worktreePath("g", "frontend")));
+        assert.ok(sb.state("g")?.members.frontend);
+
+        const retry = runMultree(sb, ["add", "g", "frontend"]);
+        assert.notEqual(retry.status, 0);
+        assert.match(retry.stderr, /already in group/);
+    });
+
     // Regression: removeCommand used to fire-and-forget the async teardown
     // hook, so a failing teardown produced an unhandled-rejection abort
     // (non-zero exit) instead of the caught warning the user sees today.

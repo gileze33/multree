@@ -388,3 +388,40 @@ describe("create --from", () => {
         assert.match(r.stderr, /mutually exclusive/);
     });
 });
+
+// resolveBranchBase falls back to "origin/main" when no per-repo branch_base
+// is set. Most tests pin branch_base explicitly via the sandbox helper, so
+// this is the only place where the built-in default is actually exercised
+// end-to-end.
+describe("default branch_base (origin/main fallback)", () => {
+    let sb: Sandbox;
+
+    beforeEach(() => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    withRemote: true,
+                    defaultBranch: "main",
+                    branchBase: null,
+                },
+            ],
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    it("uses origin/main when no branch_base is set in the manifest", () => {
+        const create = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(create.status, 0, create.stderr);
+
+        const state = sb.state("g");
+        assert.equal(state?.members.api.branch, "multree/g");
+
+        // status reports the resolved base ref, so we can read the fallback
+        // directly off the output.
+        const status = runMultree(sb, ["status", "g"]);
+        assert.equal(status.status, 0, status.stderr);
+        assert.match(status.stdout, /base: origin\/main \(0 ahead \/ 0 behind\)/);
+    });
+});

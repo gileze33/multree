@@ -14,6 +14,7 @@ import type {
     ConsumeSpec,
     ExposeSpec,
     GroupState,
+    HookSpec,
     MainCheckoutAction,
     MultreeConfig,
     PrimeArtifactSpec,
@@ -22,16 +23,16 @@ import type {
 export interface FakeRepoSpec {
     key: string;
     dirname?: string;
-    install?: string;
-    setup?: string;
-    teardown?: string;
+    install?: HookSpec;
+    setup?: HookSpec;
+    teardown?: HookSpec;
     files?: Record<string, string>;
     exposes?: Record<string, ExposeSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     // Extra branches to create in the source repo before any worktree work.
-    // Each branch is forked from `develop` and gets an extra commit so it's
-    // distinguishable in ahead/behind output.
+    // Each branch is forked from the repo's default branch and gets an extra
+    // commit so it's distinguishable in ahead/behind output.
     branches?: string[];
     // If true, a bare repo is created under <reposRoot>/<dirname>.git and
     // registered as `origin` on the source repo. The initial commit (and any
@@ -42,6 +43,13 @@ export interface FakeRepoSpec {
     updateStrategy?: "rebase" | "merge";
     mainCheckoutAction?: MainCheckoutAction;
     dependsOn?: string[];
+    // Branch used for `git init -b`. Defaults to "develop". Set to "main"
+    // (etc.) to exercise the default branch_base fallback.
+    defaultBranch?: string;
+    // Per-repo branch_base override. Defaults to whatever defaultBranch
+    // resolves to. Pass `null` to omit branch_base from the manifest entirely
+    // so resolveBranchBase falls back to its built-in "origin/main".
+    branchBase?: string | null;
     // Per-repo hook timeout (string or seconds).
     hookTimeout?: string | number;
     // Artifacts to prime into each worktree before install runs.
@@ -92,6 +100,7 @@ function gitOut(cwd: string, cmd: string): string {
 }
 
 function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): void {
+    const defaultBranch = spec.defaultBranch ?? "develop";
     mkdirSync(repoDir, { recursive: true });
     if (spec.files) {
         for (const [rel, content] of Object.entries(spec.files)) {
@@ -100,7 +109,7 @@ function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): v
             writeFileSync(full, content);
         }
     }
-    git(repoDir, "init -q -b develop");
+    git(repoDir, `init -q -b ${defaultBranch}`);
     // Local config: identity + disable signing so sandbox repos don't try to
     // contact any system-level signing program.
     git(repoDir, "config user.email t@t");
@@ -112,21 +121,21 @@ function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): v
 
     if (spec.branches && spec.branches.length > 0) {
         for (const branch of spec.branches) {
-            // Create branch from develop with one extra commit so it's
+            // Create branch from the default with one extra commit so it's
             // distinguishable in ahead/behind output.
-            git(repoDir, `checkout -q -b "${branch}" develop`);
+            git(repoDir, `checkout -q -b "${branch}" ${defaultBranch}`);
             writeFileSync(join(repoDir, `${branch}.marker`), `${branch}\n`);
             git(repoDir, "add -A");
             git(repoDir, `commit -q -m "seed ${branch}"`);
         }
-        git(repoDir, "checkout -q develop");
+        git(repoDir, `checkout -q ${defaultBranch}`);
     }
 
     if (spec.withRemote) {
         const remoteDir = join(reposRoot, `${spec.dirname ?? spec.key}.git`);
         execSync(`git init -q --bare "${remoteDir}"`, { stdio: "pipe" });
         git(repoDir, `remote add origin "${remoteDir}"`);
-        git(repoDir, "push -q origin develop");
+        git(repoDir, `push -q origin ${defaultBranch}`);
         for (const branch of spec.branches ?? []) {
             git(repoDir, `push -q origin "${branch}"`);
         }
@@ -165,9 +174,12 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             hooks.timeout = spec.hookTimeout;
         }
 
+        const defaultBranch = spec.defaultBranch ?? "develop";
         repos[spec.key] = {
             path: repoDir,
-            branch_base: "develop",
+            branch_base: spec.branchBase === null
+                ? undefined
+                : (spec.branchBase ?? defaultBranch),
             hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
             exposes: spec.exposes,
             consumes: spec.consumes,

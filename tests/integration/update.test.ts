@@ -71,6 +71,12 @@ describe("update", () => {
         assert.match(r.stderr, /Invalid --strategy/);
     });
 
+    it("errors when the group does not exist", () => {
+        const r = runMultree(sb, ["update", "ghost"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /Group not found: ghost/);
+    });
+
     it("manifest-level update_strategy overrides the built-in default", () => {
         sb = createSandbox({
             updateStrategy: "merge",
