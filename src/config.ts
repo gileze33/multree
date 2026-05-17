@@ -15,6 +15,16 @@ const ALIASES_FILENAME = "aliases.json";
 // Same character class as group names — keeps profile names safe in filenames.
 const PROFILE_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
+// Set by the CLI's global-flag pre-pass for the lifetime of the process. We
+// keep this in module state rather than writing to process.env so that the
+// flag value doesn't leak into child processes (tool dispatch, the background
+// update check) via inherited env.
+let profileFromFlag: string | undefined;
+
+export function setProfileFromFlag(name: string | undefined): void {
+    profileFromFlag = name;
+}
+
 export interface ResolveOptions {
     profile?: string;
     home?: string;
@@ -31,8 +41,17 @@ export function resolveMultreeHome(home?: string): string {
     return join(homedir(), ".multree");
 }
 
+// True iff $MULTREE_HOME is explicitly set to a non-empty value. Used to
+// distinguish "user typo'd MULTREE_HOME" from "user hasn't set up multree yet"
+// when surfacing missing-directory errors.
+function isMultreeHomeExplicit(): boolean {
+    const env = process.env.MULTREE_HOME;
+    return env !== undefined && env.length > 0;
+}
+
 export function resolveProfileName(profile?: string): string {
-    const raw = profile ?? process.env.MULTREE_PROFILE ?? DEFAULT_PROFILE;
+    const raw =
+        profile ?? profileFromFlag ?? process.env.MULTREE_PROFILE ?? DEFAULT_PROFILE;
     if (!PROFILE_NAME_RE.test(raw)) {
         throw new Error(
             `Invalid profile name: ${raw} (alphanumerics, dot, underscore, hyphen only)`,
@@ -98,6 +117,15 @@ export function resolveManifest(opts: ResolveOptions = {}): ResolvedManifest {
 
 export function loadConfig(opts: ResolveOptions = {}): { config: MultreeConfig; path: string } {
     const resolved = resolveManifest(opts);
+    // Typo-protection: an explicitly-set $MULTREE_HOME pointing at a missing
+    // directory is almost always a typo, not a "you haven't set up multree
+    // yet" case. Surface a sharper error before the regular missing-yaml one.
+    if (opts.home === undefined && isMultreeHomeExplicit() && !existsSync(resolved.home)) {
+        throw new Error(
+            `$MULTREE_HOME points at a directory that does not exist: ${resolved.home}\n` +
+                `Check the value for typos, create the directory, or unset $MULTREE_HOME to use ${join(homedir(), ".multree")}.`,
+        );
+    }
     if (!existsSync(resolved.path)) {
         throw new Error(buildMissingManifestError(resolved));
     }

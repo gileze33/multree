@@ -62,14 +62,17 @@ describe("multree profile resolution", () => {
         assert.equal(r.stdout.trim(), sb.profile("work").manifestPath);
     });
 
-    it("missing $MULTREE_HOME directory errors out", () => {
+    it("explicit $MULTREE_HOME pointing at a missing directory is flagged as a typo", () => {
         const tmp = mkdtempSync(join(tmpdir(), "multree-no-home-"));
         rmSync(tmp, { recursive: true, force: true });
         const env: NodeJS.ProcessEnv = { ...process.env, MULTREE_HOME: tmp };
         delete env.MULTREE_PROFILE;
         const r = runMultree({ env }, ["list"]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /No multree manifest at/);
+        // Specific typo-protection message — distinct from the generic
+        // "No multree manifest at <path>" error you'd get for a missing yaml.
+        assert.match(r.stderr, /\$MULTREE_HOME points at a directory that does not exist/);
+        assert.match(r.stderr, new RegExp(tmp));
     });
 });
 
@@ -272,13 +275,18 @@ describe("tool dispatch through --profile", () => {
     beforeEach(() => {
         // Each profile defines a `marker` tool that writes its own name into a
         // file under the group dir. The tool name collides across profiles; only
-        // the active profile's version should run.
+        // the active profile's version should run. A second `envprobe` tool
+        // dumps the inherited MULTREE_PROFILE so the env-leak test can read it.
         sb = createMultiProfileSandbox({
             profiles: {
                 north: {
                     ...minimalRepo("api", "fake-api-north"),
                     tools: {
                         marker: { command: "echo north > {cwd}/marker.txt", open_in: "$root" },
+                        envprobe: {
+                            command: "echo MULTREE_PROFILE=${MULTREE_PROFILE:-unset} > {cwd}/env.txt",
+                            open_in: "$root",
+                        },
                     },
                 },
                 south: {
@@ -301,6 +309,23 @@ describe("tool dispatch through --profile", () => {
             "utf-8",
         );
         assert.equal(marker.trim(), "north");
+    });
+
+    it("--profile flag does not leak into tool subprocesses' env", () => {
+        // The CLI's global-flag pre-pass stashes --profile in module state, NOT
+        // in process.env. So a tool subprocess that reads MULTREE_PROFILE
+        // shouldn't see the flag value. Tests this by spawning multree with the
+        // env var deliberately unset, then asserting the inherited env is unset.
+        const env: NodeJS.ProcessEnv = { ...sb.env };
+        delete env.MULTREE_PROFILE;
+        runMultree({ env }, ["--profile", "north", "create", "feature-x", "--include", "api"]);
+        const r = runMultree({ env }, ["--profile", "north", "envprobe", "feature-x"]);
+        assert.equal(r.status, 0, r.stderr);
+        const probed = readFileSync(
+            join(sb.profile("north").worktreeRoot, "feature-x", "env.txt"),
+            "utf-8",
+        );
+        assert.equal(probed.trim(), "MULTREE_PROFILE=unset");
     });
 });
 

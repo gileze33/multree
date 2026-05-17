@@ -13,7 +13,7 @@ import { rewireCommand } from "./commands/rewire.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { updateCommand } from "./commands/update.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, setProfileFromFlag } from "./config.ts";
 import { toolCommand } from "./tools.ts";
 import type { UpdateStrategy } from "./types.ts";
 import { kickBackgroundCheck, notifyIfNewer, runUpdateCheck } from "./update-check.ts";
@@ -37,24 +37,20 @@ const BUILTIN_COMMANDS = new Set([
     "-v",
 ]);
 
-// Global flags consumed before subcommand dispatch. Each takes a value and is
-// translated into a process.env entry so loadConfig() can stay no-arg and the
-// command modules don't need to know about flags they don't own.
-const GLOBAL_FLAGS_TO_ENV: Record<string, string> = {
-    profile: "MULTREE_PROFILE",
-};
-
+// Global flags consumed before subcommand dispatch. Stripped from argv and
+// stashed in module-level state in config.ts so command modules don't need to
+// thread them through, and so they don't leak into child processes (tool
+// dispatch, the background update check) via process.env.
 function stripGlobalFlags(argv: string[]): string[] {
     const out: string[] = [];
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a.startsWith("--") && GLOBAL_FLAGS_TO_ENV[a.slice(2)]) {
-            const key = a.slice(2);
+        if (a === "--profile") {
             const value = argv[i + 1];
             if (value === undefined || value.startsWith("--")) {
-                throw new Error(`--${key} requires a value`);
+                throw new Error(`--profile requires a value`);
             }
-            process.env[GLOBAL_FLAGS_TO_ENV[key]] = value;
+            setProfileFromFlag(value);
             i++;
             continue;
         }
