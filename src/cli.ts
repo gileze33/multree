@@ -114,6 +114,24 @@ function parseJobs(raw: string): number {
     return Math.floor(n);
 }
 
+function requireGroup(positional: string[], cmd: string): string {
+    const name = positional[0];
+    if (!name) {
+        throw new Error(`${cmd} requires a group name`);
+    }
+    return name;
+}
+
+function parseStrategy(raw: string | true | undefined): UpdateStrategy | undefined {
+    if (raw === undefined || raw === true) {
+        return undefined;
+    }
+    if (raw !== "rebase" && raw !== "merge") {
+        throw new Error(`Invalid --strategy "${raw}" (expected rebase|merge)`);
+    }
+    return raw;
+}
+
 function collectFromOverrides(
     flags: Record<string, string | true>,
     includeKeys: string[],
@@ -154,10 +172,7 @@ async function main(): Promise<void> {
     try {
         switch (cmd) {
             case "create": {
-                const name = positional[0];
-                if (!name) {
-                    throw new Error("create requires a group name");
-                }
+                const name = requireGroup(positional, "create");
                 if (typeof flags.include !== "string") {
                     throw new Error("create requires --include <repo,...>");
                 }
@@ -202,49 +217,31 @@ async function main(): Promise<void> {
                 listCommand();
                 break;
             case "show":
-                if (!positional[0]) {
-                    throw new Error("show requires a group name");
-                }
-                showCommand(positional[0]);
+                showCommand(requireGroup(positional, "show"));
                 break;
-            case "status": {
-                if (!positional[0]) {
-                    throw new Error("status requires a group name");
-                }
-                statusCommand({ name: positional[0], fetch: flags.fetch === true });
+            case "status":
+                statusCommand({
+                    name: requireGroup(positional, "status"),
+                    fetch: flags.fetch === true,
+                });
                 break;
-            }
-            case "update": {
-                if (!positional[0]) {
-                    throw new Error("update requires a group name");
-                }
-                const strategy = typeof flags.strategy === "string"
-                    ? (flags.strategy as UpdateStrategy)
-                    : undefined;
-                updateCommand({ name: positional[0], strategy });
+            case "update":
+                updateCommand({
+                    name: requireGroup(positional, "update"),
+                    strategy: parseStrategy(flags.strategy),
+                });
                 break;
-            }
-            case "push": {
-                if (!positional[0]) {
-                    throw new Error("push requires a group name");
-                }
+            case "push":
                 pushCommand({
-                    name: positional[0],
+                    name: requireGroup(positional, "push"),
                     setUpstream: flags["set-upstream"] === true,
                 });
                 break;
-            }
             case "rewire":
-                if (!positional[0]) {
-                    throw new Error("rewire requires a group name");
-                }
-                rewireCommand(positional[0]);
+                rewireCommand(requireGroup(positional, "rewire"));
                 break;
             case "destroy":
-                if (!positional[0]) {
-                    throw new Error("destroy requires a group name");
-                }
-                await destroyCommand(positional[0]);
+                await destroyCommand(requireGroup(positional, "destroy"));
                 break;
             case "help":
             case "--help":
@@ -262,10 +259,7 @@ async function main(): Promise<void> {
                     help();
                     process.exit(1);
                 }
-                if (!positional[0]) {
-                    throw new Error(`${cmd} requires a group name`);
-                }
-                toolCommand(cmd, positional[0]);
+                toolCommand(cmd, requireGroup(positional, cmd));
             }
         }
     } catch (err) {

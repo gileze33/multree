@@ -1,16 +1,18 @@
 import { existsSync } from "fs";
 import { basename, join } from "path";
-import { primeArtifacts } from "../artifacts.ts";
 import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
-import { normalizeHook, runMemberHook } from "../hooks.ts";
+import { runMemberPhase } from "../phases.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
+import type { PhaseName } from "../types.ts";
 import { wireGroup } from "../wiring.ts";
 
 interface AddOptions {
     verbose?: boolean;
 }
+
+const PHASES: PhaseName[] = ["prime", "install", "setup"];
 
 export async function addCommand(
     groupName: string,
@@ -55,34 +57,18 @@ export async function addCommand(
     console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
     addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
 
-    group.members[repoName] = {
+    const member = {
         repo: repoName,
         path: worktreePath,
         branch: repoBranch,
         exposes: {},
     };
+    group.members[repoName] = member;
     saveGroup(config, group);
 
-    if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
-        console.log(`[${repoName}] priming artifacts`);
-        primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
-    }
-
-    for (const phase of ["install", "setup"] as const) {
-        const hook = normalizeHook(repoCfg.hooks?.[phase]);
-        if (!hook) {
-            continue;
-        }
-        await runMemberHook({
-            phase,
-            repoName,
-            hook,
-            repoPath,
-            worktreePath,
-            repoCfg,
-            config,
-            verbose: opts.verbose,
-        });
+    const ctx = { repoName, repoCfg, repoPath, worktreePath };
+    for (const phase of PHASES) {
+        await runMemberPhase(config, ctx, member, phase, { verbose: opts.verbose });
     }
 
     // Re-wire across the whole group: the new repo's exposes (if any) may

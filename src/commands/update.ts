@@ -1,17 +1,12 @@
 import { expandPath, loadConfig, resolveBranchBase, resolveUpdateStrategy } from "../config.ts";
 import { fetchRepo, isDirty, mergeFrom, rebaseOnto, refExists } from "../git.ts";
 import { loadGroup } from "../state.ts";
-import type { GroupState, MultreeConfig, RepoConfig, UpdateStrategy } from "../types.ts";
+import type { MultreeConfig, RepoConfig, UpdateStrategy } from "../types.ts";
+import { exitIfAnyFailed, indent, printSummary, type SummaryOutcome } from "./_outcomes.ts";
 
 interface UpdateArgs {
     name: string;
     strategy?: UpdateStrategy;
-}
-
-interface MemberOutcome {
-    repo: string;
-    status: "updated" | "skipped-dirty" | "missing-config" | "missing-base" | "failed";
-    detail?: string;
 }
 
 export function updateCommand(args: UpdateArgs): void {
@@ -21,26 +16,19 @@ export function updateCommand(args: UpdateArgs): void {
         throw new Error(`Group not found: ${args.name}`);
     }
 
-    if (args.strategy && args.strategy !== "rebase" && args.strategy !== "merge") {
-        throw new Error(`Invalid --strategy "${args.strategy}" (expected rebase|merge)`);
-    }
-
-    const outcomes: MemberOutcome[] = [];
+    const outcomes: SummaryOutcome[] = [];
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
         if (!repoCfg) {
             console.warn(`[${repoName}] no longer in config; skipping`);
-            outcomes.push({ repo: repoName, status: "missing-config" });
+            outcomes.push({ repo: repoName, kind: "skipped", message: "skipped (no longer in manifest)" });
             continue;
         }
         outcomes.push(updateOneMember(config, repoCfg, repoName, member.path, args.strategy));
     }
 
-    reportUpdateOutcomes(group, outcomes);
-    const failed = outcomes.some(o => o.status === "failed");
-    if (failed) {
-        process.exit(1);
-    }
+    printSummary(`update summary for "${group.name}"`, outcomes);
+    exitIfAnyFailed(outcomes);
 }
 
 function updateOneMember(
@@ -49,14 +37,14 @@ function updateOneMember(
     repoName: string,
     worktreePath: string,
     explicitStrategy: UpdateStrategy | undefined,
-): MemberOutcome {
+): SummaryOutcome {
     const repoPath = expandPath(repoCfg.path);
     const baseRef = resolveBranchBase(repoCfg);
     const strategy = explicitStrategy ?? resolveUpdateStrategy(config, repoCfg);
 
     if (isDirty(worktreePath)) {
         console.log(`[${repoName}] dirty working tree; skipping`);
-        return { repo: repoName, status: "skipped-dirty" };
+        return { repo: repoName, kind: "skipped", message: "skipped (dirty working tree)" };
     }
 
     console.log(`\n[${repoName}] git fetch (${repoPath})`);
@@ -64,7 +52,7 @@ function updateOneMember(
 
     if (!refExists(worktreePath, baseRef)) {
         console.warn(`[${repoName}] base ref "${baseRef}" not found; skipping`);
-        return { repo: repoName, status: "missing-base", detail: baseRef };
+        return { repo: repoName, kind: "skipped", message: `skipped (base ref "${baseRef}" not found)` };
     }
 
     console.log(`[${repoName}] ${strategy} ${baseRef} into worktree`);
@@ -77,35 +65,8 @@ function updateOneMember(
         if (result.output.trim()) {
             console.error(indent(result.output.trim(), "  "));
         }
-        return { repo: repoName, status: "failed", detail: strategy };
+        return { repo: repoName, kind: "failed", message: `${strategy} failed; aborted and reset` };
     }
 
-    return { repo: repoName, status: "updated", detail: strategy };
-}
-
-function reportUpdateOutcomes(group: GroupState, outcomes: MemberOutcome[]): void {
-    console.log(`\n--- update summary for "${group.name}" ---`);
-    for (const o of outcomes) {
-        switch (o.status) {
-            case "updated":
-                console.log(`  ✓ ${o.repo} (${o.detail})`);
-                break;
-            case "skipped-dirty":
-                console.log(`  • ${o.repo}: skipped (dirty working tree)`);
-                break;
-            case "missing-base":
-                console.log(`  • ${o.repo}: skipped (base ref "${o.detail}" not found)`);
-                break;
-            case "missing-config":
-                console.log(`  • ${o.repo}: skipped (no longer in manifest)`);
-                break;
-            case "failed":
-                console.log(`  ✗ ${o.repo}: ${o.detail} failed; aborted and reset`);
-                break;
-        }
-    }
-}
-
-function indent(text: string, prefix: string): string {
-    return text.split("\n").map(l => prefix + l).join("\n");
+    return { repo: repoName, kind: "ok", message: strategy };
 }

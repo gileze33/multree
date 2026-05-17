@@ -9,21 +9,17 @@ import {
     writeFileSync,
 } from "fs";
 import { join } from "path";
-import { expandPath } from "./config.ts";
+import { resolveWorktreeRoot } from "./config.ts";
 import type { GroupState, MultreeConfig } from "./types.ts";
 
 const STATE_FILENAME = ".multree.json";
 const TMP_SUFFIX = ".tmp";
 
-function worktreeRoot(config: MultreeConfig): string {
-    return expandPath(config.worktree_root ?? "~/dev/worktree");
-}
-
 export function groupDir(config: MultreeConfig, name: string): string {
     if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
         throw new Error(`Invalid group name: ${name} (alphanumerics, dot, underscore, hyphen only)`);
     }
-    return join(worktreeRoot(config), name);
+    return join(resolveWorktreeRoot(config), name);
 }
 
 // Atomic write: stage to a sibling .tmp then rename over the canonical name.
@@ -60,7 +56,7 @@ export function loadGroup(config: MultreeConfig, name: string): GroupState | nul
 }
 
 export function listGroups(config: MultreeConfig): GroupState[] {
-    const root = worktreeRoot(config);
+    const root = resolveWorktreeRoot(config);
     if (!existsSync(root)) {
         return [];
     }
