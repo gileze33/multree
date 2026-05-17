@@ -137,6 +137,60 @@ describe("upsertManagedBlock", () => {
         const content = readFileSync(f, "utf-8");
         assert.match(content, /TOKEN=a=b=c/);
     });
+
+    // Without rejection, a producer-supplied newline inside a value smuggles
+    // an arbitrary `KEY=VALUE` line into the consumer's env file (and worse,
+    // can forge the managed-block closing sentinel, breaking idempotency).
+    // Reject at the write boundary so every caller is protected.
+    it("rejects values containing a newline", () => {
+        const f = join(dir, ".env");
+        assert.throws(
+            () => upsertManagedBlock(f, { API_URL: "http://h:5000\nEVIL=injected" }, "g"),
+            /newline/i,
+        );
+    });
+
+    it("rejects values containing a carriage return", () => {
+        const f = join(dir, ".env");
+        assert.throws(
+            () => upsertManagedBlock(f, { API_URL: "5000\rEVIL=injected" }, "g"),
+            /newline|carriage|control/i,
+        );
+    });
+
+    it("rejects keys containing a newline", () => {
+        const f = join(dir, ".env");
+        assert.throws(
+            () => upsertManagedBlock(f, { "OK\nEVIL": "x" }, "g"),
+            /newline/i,
+        );
+    });
+
+    it("never writes a partial managed block when one value is rejected", () => {
+        const f = join(dir, ".env");
+        writeFileSync(f, "USER_VAR=keep\n");
+        assert.throws(() =>
+            upsertManagedBlock(f, { GOOD: "ok", BAD: "x\nEVIL=injected" }, "g"),
+        );
+        const content = readFileSync(f, "utf-8");
+        assert.equal(content, "USER_VAR=keep\n", "file must be untouched on validation failure");
+        assert.doesNotMatch(content, /multree-managed/);
+        assert.doesNotMatch(content, /GOOD=/);
+    });
+
+    // Guard against over-correction: values containing characters that look
+    // dangerous but are perfectly safe on a single line must keep working.
+    it("still accepts safe values with quotes, '#', and spaces", () => {
+        const f = join(dir, ".env");
+        upsertManagedBlock(
+            f,
+            { COMMENTY: "value # not-a-comment", QUOTED: '"with spaces"' },
+            "g",
+        );
+        const content = readFileSync(f, "utf-8");
+        assert.match(content, /COMMENTY=value # not-a-comment/);
+        assert.match(content, /QUOTED="with spaces"/);
+    });
 });
 
 describe("removeManagedBlock", () => {

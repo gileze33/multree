@@ -29,11 +29,32 @@ export function parseEnvFile(path: string): Record<string, string> {
 const BLOCK_START = (marker: string) => `# >>> multree-managed: ${marker} >>>`;
 const BLOCK_END = (marker: string) => `# <<< multree-managed: ${marker} <<<`;
 
+// Reject any key or value containing characters that would let a wired pair
+// span multiple lines in the consumer's env file. A literal `\n` or `\r`
+// inside a value smuggles arbitrary `KEY=VALUE` lines into the managed block
+// (and, if the smuggled content matches the close sentinel, breaks the
+// idempotency contract of stripManagedBlock on the next rewire).
+function assertSafeForEnvLine(kind: "key" | "value", name: string, s: string): void {
+    if (/[\n\r]/.test(s)) {
+        throw new Error(
+            `Refusing to write env ${kind} "${name}": embedded newline or carriage return ` +
+                `would smuggle additional lines into the managed block.`,
+        );
+    }
+}
+
 export function upsertManagedBlock(
     path: string,
     updates: Record<string, string>,
     marker: string,
 ): void {
+    // Validate every entry up front so a single bad value can't leave the
+    // file partially rewritten with some pairs in place and the rest missing.
+    for (const [k, v] of Object.entries(updates)) {
+        assertSafeForEnvLine("key", k, k);
+        assertSafeForEnvLine("value", k, v);
+    }
+
     const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
     const stripped = stripManagedBlock(existing, marker);
 

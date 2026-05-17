@@ -39,6 +39,26 @@ describe("groupDir", () => {
         const cfg = makeConfig("/tmp/wt");
         assert.equal(groupDir(cfg, "feature.1_test-x"), "/tmp/wt/feature.1_test-x");
     });
+
+    // The chars `.` and `..` pass the simple character-class regex but resolve
+    // via path.join() to the worktree root itself / its parent. Combined with
+    // deleteGroupDir's recursive rmSync this would destroy the entire root (or
+    // its parent) when the user typed `multree destroy .` / `destroy ..`.
+    it("rejects '.' as a group name", () => {
+        const cfg = makeConfig("/tmp/wt");
+        assert.throws(() => groupDir(cfg, "."), /Invalid group name/);
+    });
+
+    it("rejects '..' as a group name", () => {
+        const cfg = makeConfig("/tmp/wt");
+        assert.throws(() => groupDir(cfg, ".."), /Invalid group name/);
+    });
+
+    it("still accepts names that merely contain dots (e.g. '...', 'a..b')", () => {
+        const cfg = makeConfig("/tmp/wt");
+        assert.equal(groupDir(cfg, "..."), "/tmp/wt/...");
+        assert.equal(groupDir(cfg, "a..b"), "/tmp/wt/a..b");
+    });
 });
 
 describe("saveGroup / loadGroup", () => {

@@ -58,6 +58,19 @@ export function resolveTemplate(
     });
 }
 
+// Strip everything from the first newline / carriage return onwards. The
+// common cause for one of these landing in a resolved value is a multi-line
+// YAML default the user typo'd ("port: |\n  5000" instead of "port: 5000");
+// truncating preserves the legitimate prefix while ensuring the smuggled
+// suffix never reaches upsertManagedBlock's hard guard.
+function sanitizeResolvedValue(value: string): { sanitized: string; stripped: boolean } {
+    const idx = value.search(/[\n\r]/);
+    if (idx === -1) {
+        return { sanitized: value, stripped: false };
+    }
+    return { sanitized: value.slice(0, idx), stripped: true };
+}
+
 export function applyConsumes(
     memberPath: string,
     consumes: ConsumeSpec | undefined,
@@ -69,7 +82,15 @@ export function applyConsumes(
     }
     const resolved: Record<string, string> = {};
     for (const [k, tmpl] of Object.entries(consumes.upsert)) {
-        resolved[k] = resolveTemplate(tmpl, context);
+        const raw = resolveTemplate(tmpl, context);
+        const { sanitized, stripped } = sanitizeResolvedValue(raw);
+        if (stripped) {
+            console.warn(
+                `  ! ${consumes.file} ${k}: stripped embedded newline from resolved value; ` +
+                    `using "${sanitized}" (check the producer's exposes / defaults)`,
+            );
+        }
+        resolved[k] = sanitized;
     }
     upsertManagedBlock(join(memberPath, consumes.file), resolved, marker);
     console.log(`  wired ${Object.keys(resolved).length} var(s) into ${consumes.file}`);
