@@ -67,8 +67,11 @@ function listProfiles(): void {
             kind = "alias+file";
         } else if (isAlias) {
             kind = "alias";
-        } else {
+        } else if (isFile) {
             kind = "file";
+        } else {
+            // Only referenced as an alias target; no backing yaml on disk.
+            kind = "missing";
         }
         const target = isAlias ? `-> ${aliases[name]}` : "";
         const active = name === resolved.profile ? "*" : "";
@@ -88,12 +91,13 @@ function listProfiles(): void {
             `${pad(r.active, w.active)}  ${pad(r.name, w.name)}  ${pad(r.kind, w.kind)}  ${r.target}`,
         );
     }
+    const missingNote = !existsSync(resolved.path) ? " (MISSING)" : "";
     if (resolved.aliased) {
         console.log(
-            `\nActive profile: ${resolved.profile} -> ${resolved.resolvedProfile} (${resolved.path})`,
+            `\nActive profile: ${resolved.profile} -> ${resolved.resolvedProfile} (${resolved.path})${missingNote}`,
         );
     } else {
-        console.log(`\nActive profile: ${resolved.profile} (${resolved.path})`);
+        console.log(`\nActive profile: ${resolved.profile} (${resolved.path})${missingNote}`);
     }
 }
 

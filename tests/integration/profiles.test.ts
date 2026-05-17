@@ -66,7 +66,6 @@ describe("multree profile resolution", () => {
         const tmp = mkdtempSync(join(tmpdir(), "multree-no-home-"));
         rmSync(tmp, { recursive: true, force: true });
         const env: NodeJS.ProcessEnv = { ...process.env, MULTREE_HOME: tmp };
-        delete env.MULTREE_CONFIG;
         delete env.MULTREE_PROFILE;
         const r = runMultree({ env }, ["list"]);
         assert.notEqual(r.status, 0);
@@ -157,6 +156,27 @@ describe("multree profile aliases", () => {
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /Invalid profile name/);
     });
+
+    it("--profile placed after positional args is still stripped", () => {
+        // The global-flag pre-pass walks the whole argv, not just the head, so
+        // `multree <cmd> <pos> --profile <name>` resolves the same as
+        // `multree --profile <name> <cmd> <pos>`.
+        const a = runMultree(sb, ["profile", "path", "--profile", "work"]);
+        const b = runMultree(sb, ["--profile", "work", "profile", "path"]);
+        assert.equal(a.status, 0, a.stderr);
+        assert.equal(b.status, 0, b.stderr);
+        assert.equal(a.stdout.trim(), b.stdout.trim());
+        assert.equal(a.stdout.trim(), sb.profile("work").manifestPath);
+    });
+
+    it("flags `missing` for a dangling alias target with no backing yaml", () => {
+        // Alias `default -> ghost`; no ghost.yaml exists.
+        sb.writeAliases({ default: "ghost" });
+        const r = runMultree(sb, ["profile", "list"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /ghost\s+missing/);
+        assert.match(r.stdout, /\(MISSING\)/);
+    });
 });
 
 describe("multree profile isolation", () => {
@@ -246,6 +266,44 @@ describe("multree profile isolation", () => {
     });
 });
 
+describe("tool dispatch through --profile", () => {
+    let sb: MultiProfileSandbox;
+
+    beforeEach(() => {
+        // Each profile defines a `marker` tool that writes its own name into a
+        // file under the group dir. The tool name collides across profiles; only
+        // the active profile's version should run.
+        sb = createMultiProfileSandbox({
+            profiles: {
+                north: {
+                    ...minimalRepo("api", "fake-api-north"),
+                    tools: {
+                        marker: { command: "echo north > {cwd}/marker.txt", open_in: "$root" },
+                    },
+                },
+                south: {
+                    ...minimalRepo("api", "fake-api-south"),
+                    tools: {
+                        marker: { command: "echo south > {cwd}/marker.txt", open_in: "$root" },
+                    },
+                },
+            },
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    it("routes to the active profile's tool, not the other one", () => {
+        runMultree(sb, ["--profile", "north", "create", "feature-x", "--include", "api"]);
+        const r = runMultree(sb, ["--profile", "north", "marker", "feature-x"]);
+        assert.equal(r.status, 0, r.stderr);
+        const marker = readFileSync(
+            join(sb.profile("north").worktreeRoot, "feature-x", "marker.txt"),
+            "utf-8",
+        );
+        assert.equal(marker.trim(), "north");
+    });
+});
+
 describe("multree honours $MULTREE_HOME for a single-profile sandbox", () => {
     let sb: Sandbox;
     beforeEach(() => {
@@ -253,35 +311,16 @@ describe("multree honours $MULTREE_HOME for a single-profile sandbox", () => {
     });
     afterEach(() => sb.cleanup());
 
-    it("does not regress: existing tests' default-profile flow still works", () => {
-        // Sanity that the sandbox env switch from MULTREE_CONFIG to MULTREE_HOME
-        // didn't break the single-profile contract every other integration test
-        // relies on.
+    it("single-profile default flow works end to end", () => {
         const r = runMultree(sb, ["list"]);
         assert.equal(r.status, 0, r.stderr);
         assert.match(r.stdout, /No active worktree groups\./);
     });
 
     it("loads default.yaml from the sandbox home", () => {
-        // The manifest file is written by the sandbox helper at <home>/default.yaml.
         const r = runMultree(sb, ["profile", "path"]);
         assert.equal(r.status, 0, r.stderr);
         assert.equal(r.stdout.trim(), sb.manifestPath);
-    });
-
-    it("ignores a stray MULTREE_CONFIG env var (no fallback path)", () => {
-        // Confirm the clean break: setting MULTREE_CONFIG does nothing now.
-        const fake = join(sb.root, "should-not-be-read.yaml");
-        writeFileSync(fake, "version: 999\n");
-        const env = { ...sb.env, MULTREE_CONFIG: fake };
-        const r = runMultree({ env }, ["profile", "path"]);
-        assert.equal(r.status, 0, r.stderr);
-        // Still points at the sandbox's default.yaml, not the stray file.
-        assert.equal(r.stdout.trim(), sb.manifestPath);
-        // And `list` (which loads the actual config) works — so version: 999
-        // was never read.
-        const list = runMultree({ env }, ["list"]);
-        assert.equal(list.status, 0, list.stderr);
     });
 });
 

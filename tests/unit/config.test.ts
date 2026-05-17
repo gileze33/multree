@@ -39,14 +39,12 @@ describe("loadConfig", () => {
     let home: string;
     const savedHome = process.env.MULTREE_HOME;
     const savedProfile = process.env.MULTREE_PROFILE;
-    const savedConfig = process.env.MULTREE_CONFIG;
 
     beforeEach(() => {
         home = mkdtempSync(join(tmpdir(), "multree-config-"));
         mkdirSync(home, { recursive: true });
         process.env.MULTREE_HOME = home;
         delete process.env.MULTREE_PROFILE;
-        delete process.env.MULTREE_CONFIG;
     });
     afterEach(() => {
         rmSync(home, { recursive: true, force: true });
@@ -59,11 +57,6 @@ describe("loadConfig", () => {
             delete process.env.MULTREE_PROFILE;
         } else {
             process.env.MULTREE_PROFILE = savedProfile;
-        }
-        if (savedConfig === undefined) {
-            delete process.env.MULTREE_CONFIG;
-        } else {
-            process.env.MULTREE_CONFIG = savedConfig;
         }
     });
 

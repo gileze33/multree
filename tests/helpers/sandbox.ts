@@ -18,6 +18,7 @@ import type {
     MainCheckoutAction,
     MultreeConfig,
     PrimeArtifactSpec,
+    ToolConfig,
 } from "../../src/types.ts";
 
 export interface FakeRepoSpec {
@@ -65,6 +66,7 @@ export interface SandboxOptions {
     jobs?: number;
     parallelSetup?: boolean;
     hookTimeout?: string | number;
+    tools?: Record<string, ToolConfig>;
 }
 
 // Rich per-profile handle. Returned by `createMultiProfileSandbox().profile(name)`
@@ -227,7 +229,6 @@ function createSandboxRoot(prefix: string): SandboxRoot {
         MULTREE_HOME: home,
         [TRACE_VAR]: traceLog,
     };
-    delete env.MULTREE_CONFIG;
     delete env.MULTREE_PROFILE;
     return {
         root,
@@ -260,6 +261,7 @@ function createProfileFixture(
         version: 1,
         worktree_root: worktreeRoot,
         repos,
+        tools: opts.tools,
         update_strategy: opts.updateStrategy,
         main_checkout_action: opts.mainCheckoutAction,
         jobs: opts.jobs,

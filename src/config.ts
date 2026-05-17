@@ -110,14 +110,10 @@ function buildMissingManifestError(resolved: ResolvedManifest): string {
     const aliasNote = resolved.aliased
         ? ` (profile "${resolved.profile}" is aliased to "${resolved.resolvedProfile}")`
         : "";
-    const legacyHome = join(homedir(), "multree.config.yaml");
-    const legacyHint = existsSync(legacyHome)
-        ? `\nA legacy config exists at ${legacyHome}. Move it to ${profileFilePath(resolved.home, DEFAULT_PROFILE)} to use it.`
-        : "";
     return (
         `No multree manifest at ${resolved.path}${aliasNote}.\n` +
         `Create it (copy multree.config.example.yaml from the repo) or pick a different profile ` +
-        `with --profile <name> or $MULTREE_PROFILE.${legacyHint}`
+        `with --profile <name> or $MULTREE_PROFILE.`
     );
 }
 

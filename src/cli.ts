@@ -42,7 +42,6 @@ const BUILTIN_COMMANDS = new Set([
 // command modules don't need to know about flags they don't own.
 const GLOBAL_FLAGS_TO_ENV: Record<string, string> = {
     profile: "MULTREE_PROFILE",
-    home: "MULTREE_HOME",
 };
 
 function stripGlobalFlags(argv: string[]): string[] {
@@ -118,7 +117,7 @@ function help(): void {
     console.log(`multree — multi-repo git worktree group orchestrator
 
 Usage:
-  multree [--profile <name>] [--home <path>] <command> [...]
+  multree [--profile <name>] <command> [...]
 
   multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
                                                   [--jobs <N>] [--plan] [--resume] [--verbose]
