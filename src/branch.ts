@@ -1,29 +1,13 @@
-import { realpathSync } from "fs";
 import { defaultBranchFromBase, resolveMainCheckoutAction } from "./config.ts";
 import {
     branchExists,
     detachHead,
     findBranchCheckout,
     isDirty,
+    samePath,
     switchBranch,
 } from "./git.ts";
 import type { MultreeConfig, RepoConfig } from "./types.ts";
-
-// macOS reports paths under /var/folders via /private/var/folders because
-// /var is a symlink; git canonicalises through realpath when listing
-// worktrees, so a plain string compare against the path we hand to it
-// misidentifies the main checkout as "some other worktree". Canonicalise
-// both sides before comparing.
-function samePath(a: string, b: string): boolean {
-    if (a === b) {
-        return true;
-    }
-    try {
-        return realpathSync(a) === realpathSync(b);
-    } catch {
-        return false;
-    }
-}
 
 // Plan to free a target branch from the source repo's main checkout (if
 // needed). Returned as a plan object so callers can validate first, then

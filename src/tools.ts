@@ -40,11 +40,6 @@ function runArgvCommand(argv: string[], cwd: string): void {
     execFileSync(bin, rest, { cwd, stdio: "inherit" });
 }
 
-export function isToolName(name: string): boolean {
-    const { config } = loadConfig();
-    return Boolean(config.tools && config.tools[name]);
-}
-
 export function toolCommand(toolName: string, groupName: string): void {
     const { config } = loadConfig();
     const tool: ToolConfig | undefined = config.tools?.[toolName];

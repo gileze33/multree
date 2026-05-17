@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { parse } from "yaml";
+import { detectCycle } from "./scheduler.ts";
 import type {
     MainCheckoutAction,
     MultreeConfig,
@@ -47,41 +48,25 @@ function validate(cfg: MultreeConfig): void {
 }
 
 function validateDependsOn(cfg: MultreeConfig): void {
-    const known = new Set(Object.keys(cfg.repos));
+    const known = Object.keys(cfg.repos);
+    const depsOf: Record<string, string[]> = {};
     for (const [name, repo] of Object.entries(cfg.repos)) {
         if (!repo.depends_on) {
             continue;
         }
         for (const dep of repo.depends_on) {
-            if (!known.has(dep)) {
+            if (!cfg.repos[dep]) {
                 throw new Error(`Repo "${name}" depends_on unknown repo "${dep}"`);
             }
             if (dep === name) {
                 throw new Error(`Repo "${name}" depends_on itself`);
             }
         }
+        depsOf[name] = repo.depends_on;
     }
-    // Cycle detection via DFS over the full repo graph.
-    const color: Record<string, "white" | "gray" | "black"> = {};
-    for (const k of known) {
-        color[k] = "white";
-    }
-    function visit(key: string, stack: string[]): void {
-        if (color[key] === "black") {
-            return;
-        }
-        if (color[key] === "gray") {
-            const path = [...stack.slice(stack.indexOf(key)), key].join(" -> ");
-            throw new Error(`depends_on cycle: ${path}`);
-        }
-        color[key] = "gray";
-        for (const dep of cfg.repos[key].depends_on ?? []) {
-            visit(dep, [...stack, key]);
-        }
-        color[key] = "black";
-    }
-    for (const k of known) {
-        visit(k, []);
+    const cycle = detectCycle(known, depsOf);
+    if (cycle) {
+        throw new Error(`depends_on cycle: ${cycle.join(" -> ")}`);
     }
 }
 
@@ -90,6 +75,10 @@ export function expandPath(p: string): string {
         return join(homedir(), p.slice(2));
     }
     return p;
+}
+
+export function resolveWorktreeRoot(cfg: MultreeConfig): string {
+    return expandPath(cfg.worktree_root ?? "~/dev/worktree");
 }
 
 export function resolveBranchBase(repoCfg: { branch_base?: string }): string {

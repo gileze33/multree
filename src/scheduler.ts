@@ -24,38 +24,78 @@ export interface ScheduleOptions {
     depsOf?: Record<string, string[]>;
 }
 
-// Topologically sort `items` so each item appears after its dependencies.
-// Throws if a cycle is detected, naming one offending key. Ignores deps that
-// reference unknown keys (the caller is expected to validate that separately).
-export function topoOrder(items: string[], depsOf: Record<string, string[]>): string[] {
+// Returns the first cycle found in the `items` subgraph, as a path
+// (e.g. ["a", "b", "a"]), or null if the graph is acyclic. Ignores deps
+// pointing outside `items` — the caller is expected to validate those
+// separately if needed.
+export function detectCycle(
+    items: string[],
+    depsOf: Record<string, string[]>,
+): string[] | null {
     const set = new Set(items);
     const color = new Map<string, "white" | "gray" | "black">();
     for (const key of items) {
         color.set(key, "white");
     }
-    const out: string[] = [];
+    let found: string[] | null = null;
 
     function visit(key: string, stack: string[]): void {
+        if (found) {
+            return;
+        }
         const c = color.get(key);
         if (c === "black") {
             return;
         }
         if (c === "gray") {
-            const cycle = [...stack.slice(stack.indexOf(key)), key].join(" -> ");
-            throw new Error(`Dependency cycle detected: ${cycle}`);
+            found = [...stack.slice(stack.indexOf(key)), key];
+            return;
         }
         color.set(key, "gray");
         for (const dep of depsOf[key] ?? []) {
             if (set.has(dep)) {
                 visit(dep, [...stack, key]);
+                if (found) {
+                    return;
+                }
             }
         }
         color.set(key, "black");
-        out.push(key);
     }
 
     for (const key of items) {
         visit(key, []);
+        if (found) {
+            return found;
+        }
+    }
+    return null;
+}
+
+// Topologically sort `items` so each item appears after its dependencies.
+// Throws if a cycle is detected, naming one offending key.
+export function topoOrder(items: string[], depsOf: Record<string, string[]>): string[] {
+    const cycle = detectCycle(items, depsOf);
+    if (cycle) {
+        throw new Error(`Dependency cycle detected: ${cycle.join(" -> ")}`);
+    }
+    const set = new Set(items);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    function visit(key: string): void {
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        for (const dep of depsOf[key] ?? []) {
+            if (set.has(dep)) {
+                visit(dep);
+            }
+        }
+        out.push(key);
+    }
+    for (const key of items) {
+        visit(key);
     }
     return out;
 }
@@ -69,7 +109,10 @@ export async function runScheduled(
 ): Promise<TaskResult[]> {
     const deps = opts.depsOf ?? {};
     // Validate cycles up front (works even when jobs=1).
-    topoOrder(items, deps);
+    const cycle = detectCycle(items, deps);
+    if (cycle) {
+        throw new Error(`Dependency cycle detected: ${cycle.join(" -> ")}`);
+    }
 
     const jobs = Math.max(1, opts.jobs | 0);
     const results = new Map<string, TaskResult>();

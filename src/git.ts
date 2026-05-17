@@ -30,7 +30,7 @@ interface GitResult {
 // /private/var/folders. git canonicalises through realpath, so a string
 // compare against the path we passed in misidentifies the same on-disk
 // location. Canonicalise both sides before comparing.
-function samePath(a: string, b: string): boolean {
+export function samePath(a: string, b: string): boolean {
     if (a === b) {
         return true;
     }

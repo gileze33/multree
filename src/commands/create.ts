@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync } from "fs";
 import { cpus } from "os";
 import { basename, join } from "path";
-import { primeArtifacts } from "../artifacts.ts";
 import {
     executeMainCheckoutRelease,
     planMainCheckoutRelease,
@@ -9,22 +8,17 @@ import {
 } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
-import {
-    HookFailureError,
-    HookTimeoutError,
-    normalizeHook,
-    runMemberHook,
-} from "../hooks.ts";
+import { HookFailureError, HookTimeoutError, normalizeHook } from "../hooks.ts";
+import { runMemberPhase } from "../phases.ts";
 import { runScheduled, topoOrder } from "../scheduler.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import type {
     GroupState,
-    MemberState,
     MultreeConfig,
     PhaseName,
     RepoConfig,
 } from "../types.ts";
-import { readExposes, wireGroup } from "../wiring.ts";
+import { wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
     name: string;
@@ -194,7 +188,7 @@ async function runPhase(
             return;
         }
         try {
-            await executePhase(config, plan, member, phase, verbose);
+            await runMemberPhase(config, plan, member, phase, { verbose });
             recordPhase(group, repoName, phase, "done");
         } catch (err) {
             recordPhase(group, repoName, phase, "failed");
@@ -231,41 +225,6 @@ function formatFailureLine(repoName: string, err: Error | undefined): string {
         return `  [${repoName}] ${err.message}`;
     }
     return `  [${repoName}] ${err.message}`;
-}
-
-async function executePhase(
-    config: MultreeConfig,
-    plan: MemberPlan,
-    member: MemberState,
-    phase: PhaseName,
-    verbose: boolean,
-): Promise<void> {
-    const { repoName, repoCfg, repoPath, worktreePath } = plan;
-    if (phase === "prime") {
-        if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
-            console.log(`[${repoName}] priming artifacts`);
-            primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
-        }
-        return;
-    }
-    const hookSpec = phase === "install" ? repoCfg.hooks?.install : repoCfg.hooks?.setup;
-    const hook = normalizeHook(hookSpec);
-    if (!hook) {
-        return;
-    }
-    await runMemberHook({
-        phase,
-        repoName,
-        hook,
-        repoPath,
-        worktreePath,
-        repoCfg,
-        config,
-        verbose,
-    });
-    if (phase === "setup") {
-        member.exposes = readExposes(worktreePath, repoCfg.exposes);
-    }
 }
 
 function recordPhase(
