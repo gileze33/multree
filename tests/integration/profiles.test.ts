@@ -160,6 +160,15 @@ describe("multree profile aliases", () => {
         assert.match(r.stderr, /Invalid profile name/);
     });
 
+    it("--profile with no value errors cleanly (no stack trace)", () => {
+        const r = runMultree(sb, ["--profile"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /--profile requires a value/);
+        // Friendly path: just the one-line error, no node stack trace.
+        assert.doesNotMatch(r.stderr, /at .*cli\.ts/);
+        assert.doesNotMatch(r.stderr, /^Error: /m);
+    });
+
     it("--profile placed after positional args is still stripped", () => {
         // The global-flag pre-pass walks the whole argv, not just the head, so
         // `multree <cmd> <pos> --profile <name>` resolves the same as

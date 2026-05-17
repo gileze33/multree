@@ -184,20 +184,20 @@ function collectFromOverrides(
 }
 
 async function main(): Promise<void> {
-    const { cmd, positional, flags } = parseArgs();
-
-    // Hidden subcommand used by the detached background process. Never emits
-    // output and never recurses into the user-facing notify/kick flow.
-    if (cmd === "__update-check") {
-        await runUpdateCheck();
-        return;
-    }
-
-    const version = readVersion();
-    notifyIfNewer(version);
-    kickBackgroundCheck();
-
     try {
+        const { cmd, positional, flags } = parseArgs();
+
+        // Hidden subcommand used by the detached background process. Never emits
+        // output and never recurses into the user-facing notify/kick flow.
+        if (cmd === "__update-check") {
+            await runUpdateCheck();
+            return;
+        }
+
+        const version = readVersion();
+        notifyIfNewer(version);
+        kickBackgroundCheck();
+
         switch (cmd) {
             case "create": {
                 const name = requireGroup(positional, "create");
