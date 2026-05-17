@@ -1,11 +1,17 @@
 # multree example manifest.
 #
-# Copy this file to ~/multree.config.yaml (or anywhere else and point
-# $MULTREE_CONFIG at it). Edit it to describe your own repos.
+# Copy this file to ~/.multree/default.yaml (or any other profile name).
+# Edit it to describe your own repos.
 #
-# multree reads the manifest from, in order:
-#   1. $MULTREE_CONFIG (if set)
-#   2. ~/multree.config.yaml
+# multree reads the manifest from:
+#   <$MULTREE_HOME or ~/.multree>/<profile>.yaml
+#
+# Profile resolution, in order:
+#   1. --profile <name> CLI flag
+#   2. $MULTREE_PROFILE env var
+#   3. "default"
+# Then aliases.json (one hop) gives the resolved profile name. Manage with
+# `multree profile list|path|alias|unalias`.
 #
 # Once your manifest is in place: `multree create <group> --include <repo,...>`.
 

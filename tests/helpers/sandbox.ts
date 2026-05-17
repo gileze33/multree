@@ -144,18 +144,9 @@ function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): v
     }
 }
 
-export function createSandbox(opts: SandboxOptions): Sandbox {
-    const root = mkdtempSync(join(tmpdir(), "multree-sandbox-"));
-    const reposRoot = join(root, "repos");
-    const worktreeRoot = join(root, "worktree");
-    mkdirSync(reposRoot, { recursive: true });
-    mkdirSync(worktreeRoot, { recursive: true });
-
-    const traceLog = join(root, "trace.log");
-    writeFileSync(traceLog, "");
-
+function buildRepoMap(specs: FakeRepoSpec[], reposRoot: string): MultreeConfig["repos"] {
     const repos: MultreeConfig["repos"] = {};
-    for (const spec of opts.repos) {
+    for (const spec of specs) {
         const dirname = spec.dirname ?? spec.key;
         const repoDir = join(reposRoot, dirname);
         initFakeRepo(repoDir, spec, reposRoot);
@@ -191,6 +182,22 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             prime_artifacts: spec.primeArtifacts,
         };
     }
+    return repos;
+}
+
+export function createSandbox(opts: SandboxOptions): Sandbox {
+    const root = mkdtempSync(join(tmpdir(), "multree-sandbox-"));
+    const home = join(root, "home");
+    const reposRoot = join(root, "repos");
+    const worktreeRoot = join(root, "worktree");
+    mkdirSync(home, { recursive: true });
+    mkdirSync(reposRoot, { recursive: true });
+    mkdirSync(worktreeRoot, { recursive: true });
+
+    const traceLog = join(root, "trace.log");
+    writeFileSync(traceLog, "");
+
+    const repos = buildRepoMap(opts.repos, reposRoot);
 
     const config: MultreeConfig = {
         version: 1,
@@ -203,14 +210,16 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         hook_timeout: opts.hookTimeout,
     };
 
-    const manifestPath = join(root, "multree.config.yaml");
+    const manifestPath = join(home, "default.yaml");
     writeFileSync(manifestPath, stringify(config));
 
     const env: NodeJS.ProcessEnv = {
         ...process.env,
-        MULTREE_CONFIG: manifestPath,
+        MULTREE_HOME: home,
         [TRACE_VAR]: traceLog,
     };
+    delete env.MULTREE_CONFIG;
+    delete env.MULTREE_PROFILE;
 
     return {
         root,
@@ -284,6 +293,133 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
                 return false;
             }
         },
+    };
+}
+
+// --- Multi-profile sandbox -------------------------------------------------
+//
+// A single MULTREE_HOME shared across N profiles, each with its own repos and
+// worktree_root. Used to assert that profiles selected via --profile /
+// $MULTREE_PROFILE / aliases.json stay fully isolated on disk and in state.
+
+export interface MultiProfileSandboxOptions {
+    profiles: Record<string, SandboxOptions>;
+    aliases?: Record<string, string>;
+}
+
+export interface ProfileHandle {
+    name: string;
+    manifestPath: string;
+    worktreeRoot: string;
+    reposRoot: string;
+    state: (group: string) => GroupState | null;
+    repoPath: (key: string) => string;
+    worktreePath: (group: string, key: string) => string;
+}
+
+export interface MultiProfileSandbox {
+    root: string;
+    home: string;
+    env: NodeJS.ProcessEnv;
+    cleanup: () => void;
+    profile: (name: string) => ProfileHandle;
+    writeAliases: (aliases: Record<string, string>) => void;
+}
+
+export function createMultiProfileSandbox(opts: MultiProfileSandboxOptions): MultiProfileSandbox {
+    const root = mkdtempSync(join(tmpdir(), "multree-sandbox-multi-"));
+    const home = join(root, "home");
+    mkdirSync(home, { recursive: true });
+
+    const handles: Record<string, ProfileHandle> = {};
+    const profileSpecs: Record<string, SandboxOptions> = {};
+
+    for (const [name, profileOpts] of Object.entries(opts.profiles)) {
+        // Per-profile reposRoot + worktreeRoot keep on-disk state strictly
+        // partitioned: same group name in two profiles cannot collide.
+        const reposRoot = join(root, `repos-${name}`);
+        const worktreeRoot = join(root, `worktree-${name}`);
+        mkdirSync(reposRoot, { recursive: true });
+        mkdirSync(worktreeRoot, { recursive: true });
+
+        const repos = buildRepoMap(profileOpts.repos, reposRoot);
+        const config: MultreeConfig = {
+            version: 1,
+            worktree_root: worktreeRoot,
+            repos,
+            update_strategy: profileOpts.updateStrategy,
+            main_checkout_action: profileOpts.mainCheckoutAction,
+            jobs: profileOpts.jobs,
+            parallel_setup: profileOpts.parallelSetup,
+            hook_timeout: profileOpts.hookTimeout,
+        };
+        const manifestPath = join(home, `${name}.yaml`);
+        writeFileSync(manifestPath, stringify(config));
+        profileSpecs[name] = profileOpts;
+
+        handles[name] = {
+            name,
+            manifestPath,
+            worktreeRoot,
+            reposRoot,
+            state(group: string) {
+                const p = join(worktreeRoot, group, ".multree.json");
+                if (!existsSync(p)) {
+                    return null;
+                }
+                return JSON.parse(readFileSync(p, "utf-8")) as GroupState;
+            },
+            repoPath(key: string) {
+                const spec = profileOpts.repos.find(r => r.key === key);
+                if (!spec) {
+                    throw new Error(`Unknown repo in profile ${name}: ${key}`);
+                }
+                return join(reposRoot, spec.dirname ?? spec.key);
+            },
+            worktreePath(group: string, key: string) {
+                const spec = profileOpts.repos.find(r => r.key === key);
+                if (!spec) {
+                    throw new Error(`Unknown repo in profile ${name}: ${key}`);
+                }
+                return join(worktreeRoot, group, spec.dirname ?? spec.key);
+            },
+        };
+    }
+
+    const writeAliasesFile = (aliases: Record<string, string>) => {
+        const ordered: Record<string, string> = {};
+        for (const k of Object.keys(aliases).sort()) {
+            ordered[k] = aliases[k];
+        }
+        writeFileSync(join(home, "aliases.json"), JSON.stringify(ordered, null, 2) + "\n");
+    };
+    if (opts.aliases) {
+        writeAliasesFile(opts.aliases);
+    }
+
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        MULTREE_HOME: home,
+    };
+    delete env.MULTREE_CONFIG;
+    delete env.MULTREE_PROFILE;
+
+    void profileSpecs;
+    return {
+        root,
+        home,
+        env,
+        cleanup() {
+            rmSync(root, { recursive: true, force: true });
+        },
+        profile(name: string) {
+            const h = handles[name];
+            if (!h) {
+                throw new Error(`Unknown profile in sandbox: ${name}`);
+            }
+            return h;
+        },
+        writeAliases: writeAliasesFile,
     };
 }
 

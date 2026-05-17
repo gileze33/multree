@@ -54,6 +54,7 @@ src/
     list.ts         # enumerate groups under worktree_root
     show.ts         # print a single group's state
     rewire.ts       # re-read exposes, re-apply consumes (no worktree changes)
+    profile.ts      # manage <$MULTREE_HOME>/ profiles: list, path, alias, unalias
 tests/
   unit/             # env block parsing, wiring template substitution
   integration/      # full command flows against fixture repos
@@ -61,12 +62,13 @@ tests/
   helpers/          # shared test scaffolding
 bin/multree                  # bash shim that execs tsx on src/cli.ts (dev only; not published)
 tsdown.config.ts             # bundler config for `pnpm build` -> dist/cli.mjs (publish only)
-multree.config.example.yaml  # committed example manifest; user copies it to ~/multree.config.yaml
+multree.config.example.yaml  # committed example manifest; user copies it to ~/.multree/<profile>.yaml
 ```
 
 ## Concepts
 
-- **Manifest** (`~/multree.config.yaml` by default, or wherever `$MULTREE_CONFIG` points): user-owned, lives outside the repo. The repo only commits `multree.config.example.yaml`. Versioned (`version: 1`). Declares `worktree_root`, `repos`, and `tools`. Loaded by `loadConfig()`.
+- **Manifest** (`<$MULTREE_HOME or ~/.multree>/<profile>.yaml`): user-owned, lives outside the repo. The repo only commits `multree.config.example.yaml`. Versioned (`version: 1`). Declares `worktree_root`, `repos`, and `tools`. Loaded by `loadConfig()`.
+- **Profile**: which yaml file in `$MULTREE_HOME` to load. Resolved in order: `--profile <name>` > `$MULTREE_PROFILE` > `"default"`, then `aliases.json` (one hop). `MULTREE_HOME` defaults to `~/.multree`. All profile resolution lives in `resolveManifest()` in `config.ts`; there is no per-profile state. Profiles are isolated purely via distinct `worktree_root` paths in each yaml — group state under each `worktree_root` knows nothing about profiles. Managed by `multree profile list|path|alias|unalias` (`src/commands/profile.ts`).
 - **Group**: a named set of worktrees living at `<worktree_root>/<group-name>/`. Persistent state is `<worktree_root>/<group-name>/.multree.json` (`GroupState` in `types.ts`).
 - **Hook phases**, in order, per repo on add/create: `prime_artifacts` → `install` → `setup`. `teardown` runs on remove/destroy. A hook is either a bare string (runs in the worktree) or `{ command, cwd: "worktree" | "repo" }`.
 - **exposes / consumes wiring**: a repo can `expose` a value read from one of its env files after setup (e.g. an api server's chosen port). Other repos `consume` that value by referencing `{<repo>.<key>}` in `consumes.upsert`, which is written into the consumer's env file inside a managed block bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<`. `defaults` provide fallback values when the producing repo isn't part of the group. Re-running `rewire` is idempotent — the managed block is replaced wholesale, never appended.
