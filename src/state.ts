@@ -16,6 +16,14 @@ const STATE_FILENAME = ".multree.json";
 const TMP_SUFFIX = ".tmp";
 
 export function groupDir(config: MultreeConfig, name: string): string {
+    // `.` and `..` pass the character-class regex below but resolve via
+    // path.join to the worktree root itself / its parent — combined with the
+    // recursive rmSync in deleteGroupDir that would wipe sibling groups (or
+    // worse, the parent directory). Reject these two names explicitly before
+    // the more permissive shape check.
+    if (name === "." || name === "..") {
+        throw new Error(`Invalid group name: ${name} (reserved path segment)`);
+    }
     if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
         throw new Error(`Invalid group name: ${name} (alphanumerics, dot, underscore, hyphen only)`);
     }
