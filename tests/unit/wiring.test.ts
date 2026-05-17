@@ -1,10 +1,26 @@
 import { strict as assert } from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import type { ExposeSpec, GroupState, MultreeConfig } from "../../src/types.ts";
-import { buildContext, readExposes, resolveTemplate } from "../../src/wiring.ts";
+import type { ConsumeSpec, ExposeSpec, GroupState, MultreeConfig } from "../../src/types.ts";
+import { applyConsumes, buildContext, readExposes, resolveTemplate } from "../../src/wiring.ts";
+
+// Capture every console.warn call made during `fn` and return them as joined
+// strings. Restores the original `console.warn` even when `fn` throws.
+function captureWarnings(fn: () => void): string[] {
+    const original = console.warn;
+    const captured: string[] = [];
+    console.warn = (...args: unknown[]) => {
+        captured.push(args.map(a => String(a)).join(" "));
+    };
+    try {
+        fn();
+    } finally {
+        console.warn = original;
+    }
+    return captured;
+}
 
 describe("resolveTemplate", () => {
     it("substitutes {repo.key} from context", () => {
@@ -110,5 +126,98 @@ describe("readExposes", () => {
             port: { type: "stdout_capture", file: "x", key: "y" },
         } as unknown as Record<string, ExposeSpec>;
         assert.throws(() => readExposes(dir, spec), /Unsupported expose type/);
+    });
+});
+
+// applyConsumes is the wiring sink. The low-level upsertManagedBlock guards
+// against `\n`/`\r` smuggling by throwing — applyConsumes self-heals before
+// reaching that guard so the user keeps moving when the most common cause is
+// just a multi-line YAML default that they almost certainly typo'd.
+describe("applyConsumes self-heals embedded newlines in resolved values", () => {
+    let dir: string;
+    beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), "multree-apply-"));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("truncates a resolved value at the first newline and writes the prefix", () => {
+        const consumes: ConsumeSpec = {
+            file: ".env",
+            upsert: { API_URL: "http://localhost:{api.port}" },
+        };
+        const ctx = { api: { port: "5000\nEVIL=injected" } };
+
+        captureWarnings(() => applyConsumes(dir, consumes, "g", ctx));
+
+        const content = readFileSync(join(dir, ".env"), "utf-8");
+        assert.match(
+            content,
+            /^API_URL=http:\/\/localhost:5000$/m,
+            "value must be truncated at the first \\n",
+        );
+        assert.doesNotMatch(content, /EVIL/, "smuggled segment must not be written");
+    });
+
+    it("emits a warning naming the consume key and file", () => {
+        const consumes: ConsumeSpec = {
+            file: ".env",
+            upsert: { API_URL: "http://localhost:{api.port}" },
+        };
+        const ctx = { api: { port: "5000\nEVIL=injected" } };
+
+        const warnings = captureWarnings(() => applyConsumes(dir, consumes, "g", ctx));
+
+        assert.ok(
+            warnings.some(w => /API_URL/.test(w) && /newline|stripped/i.test(w) && /\.env/.test(w)),
+            `expected a warning mentioning API_URL and .env; got: ${JSON.stringify(warnings)}`,
+        );
+    });
+
+    it("also strips carriage returns", () => {
+        const consumes: ConsumeSpec = {
+            file: ".env",
+            upsert: { TOKEN: "{api.tok}" },
+        };
+        const ctx = { api: { tok: "abc123\rEVIL=injected" } };
+
+        captureWarnings(() => applyConsumes(dir, consumes, "g", ctx));
+
+        const content = readFileSync(join(dir, ".env"), "utf-8");
+        assert.match(content, /^TOKEN=abc123$/m);
+        assert.doesNotMatch(content, /EVIL/);
+    });
+
+    it("sanitizes only the offending pairs; clean pairs are written verbatim", () => {
+        const consumes: ConsumeSpec = {
+            file: ".env",
+            upsert: {
+                GOOD: "ok",
+                BAD: "{api.bad}",
+            },
+        };
+        const ctx = { api: { bad: "first\nsecond" } };
+
+        captureWarnings(() => applyConsumes(dir, consumes, "g", ctx));
+
+        const content = readFileSync(join(dir, ".env"), "utf-8");
+        assert.match(content, /^GOOD=ok$/m);
+        assert.match(content, /^BAD=first$/m);
+        assert.doesNotMatch(content, /second/);
+    });
+
+    it("does not warn for values without embedded newlines", () => {
+        const consumes: ConsumeSpec = {
+            file: ".env",
+            upsert: { API_URL: "http://localhost:{api.port}" },
+        };
+        const ctx = { api: { port: "5234" } };
+
+        const warnings = captureWarnings(() => applyConsumes(dir, consumes, "g", ctx));
+
+        assert.equal(
+            warnings.filter(w => /newline|stripped/i.test(w)).length,
+            0,
+            `expected no newline-related warnings; got: ${JSON.stringify(warnings)}`,
+        );
     });
 });

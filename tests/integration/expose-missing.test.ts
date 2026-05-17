@@ -51,10 +51,11 @@ describe("expose key missing from producer env file", () => {
 
 // Regression: a producer value (or default) that contains a newline used to
 // silently inject extra `KEY=VALUE` lines into the consumer's env file, hidden
-// inside multree's managed block. Worse, a `\n` followed by the literal close
-// sentinel forged an early block end and broke the idempotency contract of
-// `rewire`. Wiring now refuses such values at the write boundary.
-describe("wiring refuses env values that would smuggle a newline", () => {
+// inside multree's managed block. Wiring now strips the offending characters
+// at the first newline and warns loudly, so the user keeps making progress
+// (typical cause: an accidental multi-line YAML default) while the smuggled
+// payload is never written to disk.
+describe("wiring self-heals env values that contain embedded newlines", () => {
     let sb: Sandbox;
 
     beforeEach(() => {
@@ -84,17 +85,27 @@ describe("wiring refuses env values that would smuggle a newline", () => {
     });
     afterEach(() => sb.cleanup());
 
-    it("aborts create and leaves the consumer's env file untouched", () => {
+    it("truncates at the first newline, warns, and writes only the sanitized value", () => {
         const r = runMultree(sb, ["create", "g", "--include", "frontend"]);
-        assert.notEqual(r.status, 0, "create must fail when a wired value has a newline");
-        assert.match(r.stderr, /newline|control/i);
+        assert.equal(r.status, 0, `create must self-heal; got: ${r.stderr}`);
+        // Warning is on stderr so the user actually sees it on a noisy run.
+        assert.match(
+            r.stderr,
+            /API_URL.*(newline|stripped)/i,
+            `expected a warning naming API_URL; got stderr: ${r.stderr}`,
+        );
 
         const envPath = join(sb.worktreePath("g", "frontend"), ".env");
-        assert.ok(existsSync(envPath), "consumer's env file must still exist");
+        assert.ok(existsSync(envPath), "consumer's env file must exist");
         const env = readFileSync(envPath, "utf-8");
+
         assert.match(env, /EXISTING=keep/, "user content must be preserved");
-        assert.doesNotMatch(env, /EVIL_INJECTED/, "smuggled line must not appear");
-        assert.doesNotMatch(env, /multree-managed/, "no managed block on failed write");
-        assert.doesNotMatch(env, /API_URL=/, "no API_URL written when validation fails");
+        assert.match(env, /multree-managed: g/, "managed block must be written");
+        assert.match(
+            env,
+            /^API_URL=http:\/\/localhost:5000$/m,
+            "API_URL must be present with the sanitized value (truncated at \\n)",
+        );
+        assert.doesNotMatch(env, /EVIL_INJECTED/, "smuggled line must never reach disk");
     });
 });
