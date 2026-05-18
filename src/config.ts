@@ -10,25 +10,138 @@ import type {
     UpdateStrategy,
 } from "./types.ts";
 
-const HOME_CONFIG_PATH = join(homedir(), "multree.config.yaml");
+export const DEFAULT_PROFILE = "default";
+const ALIASES_FILENAME = "aliases.json";
+// Same character class as group names — keeps profile names safe in filenames.
+const PROFILE_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
-export function loadConfig(): { config: MultreeConfig; path: string } {
-    const path = resolveConfigPath();
-    const config = parse(readFileSync(path, "utf-8")) as MultreeConfig;
-    validate(config);
-    return { config, path };
+// Set by the CLI's global-flag pre-pass for the lifetime of the process. We
+// keep this in module state rather than writing to process.env so that the
+// flag value doesn't leak into child processes (tool dispatch, the background
+// update check) via inherited env.
+let profileFromFlag: string | undefined;
+
+export function setProfileFromFlag(name: string | undefined): void {
+    profileFromFlag = name;
 }
 
-function resolveConfigPath(): string {
-    if (process.env.MULTREE_CONFIG) {
-        return resolve(process.env.MULTREE_CONFIG);
+export interface ResolveOptions {
+    profile?: string;
+    home?: string;
+}
+
+export function resolveMultreeHome(home?: string): string {
+    if (home !== undefined) {
+        return resolve(home);
     }
-    if (existsSync(HOME_CONFIG_PATH)) {
-        return HOME_CONFIG_PATH;
+    const env = process.env.MULTREE_HOME;
+    if (env && env.length > 0) {
+        return resolve(env);
     }
-    throw new Error(
-        `No multree manifest found. Either set $MULTREE_CONFIG, or copy ` +
-            `multree.config.example.yaml from the repo to ${HOME_CONFIG_PATH} and edit.`,
+    return join(homedir(), ".multree");
+}
+
+// True iff $MULTREE_HOME is explicitly set to a non-empty value. Used to
+// distinguish "user typo'd MULTREE_HOME" from "user hasn't set up multree yet"
+// when surfacing missing-directory errors.
+function isMultreeHomeExplicit(): boolean {
+    const env = process.env.MULTREE_HOME;
+    return env !== undefined && env.length > 0;
+}
+
+export function resolveProfileName(profile?: string): string {
+    const raw =
+        profile ?? profileFromFlag ?? process.env.MULTREE_PROFILE ?? DEFAULT_PROFILE;
+    if (!PROFILE_NAME_RE.test(raw)) {
+        throw new Error(
+            `Invalid profile name: ${raw} (alphanumerics, dot, underscore, hyphen only)`,
+        );
+    }
+    return raw;
+}
+
+export function aliasesPath(home: string): string {
+    return join(home, ALIASES_FILENAME);
+}
+
+export function loadAliases(home: string): Record<string, string> {
+    const p = aliasesPath(home);
+    if (!existsSync(p)) {
+        return {};
+    }
+    const raw = JSON.parse(readFileSync(p, "utf-8")) as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error(`${p}: expected a JSON object of { alias: target } entries`);
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof v !== "string") {
+            throw new Error(`${p}: alias ${k} target must be a string (got ${typeof v})`);
+        }
+        if (!PROFILE_NAME_RE.test(k) || !PROFILE_NAME_RE.test(v)) {
+            throw new Error(`${p}: alias ${k} -> ${v} has an invalid profile name`);
+        }
+        out[k] = v;
+    }
+    return out;
+}
+
+export function profileFilePath(home: string, profile: string): string {
+    return join(home, `${profile}.yaml`);
+}
+
+export interface ResolvedManifest {
+    home: string;
+    profile: string;
+    resolvedProfile: string;
+    path: string;
+    aliased: boolean;
+}
+
+// Single source of truth for profile resolution. One alias hop only — the
+// alias map is kept flat by `multree profile alias` so we never need to chain.
+export function resolveManifest(opts: ResolveOptions = {}): ResolvedManifest {
+    const home = resolveMultreeHome(opts.home);
+    const profile = resolveProfileName(opts.profile);
+    const aliases = loadAliases(home);
+    const target = aliases[profile];
+    const resolvedProfile = target ?? profile;
+    return {
+        home,
+        profile,
+        resolvedProfile,
+        path: profileFilePath(home, resolvedProfile),
+        aliased: target !== undefined,
+    };
+}
+
+export function loadConfig(opts: ResolveOptions = {}): { config: MultreeConfig; path: string } {
+    const resolved = resolveManifest(opts);
+    // Typo-protection: an explicitly-set $MULTREE_HOME pointing at a missing
+    // directory is almost always a typo, not a "you haven't set up multree
+    // yet" case. Surface a sharper error before the regular missing-yaml one.
+    if (opts.home === undefined && isMultreeHomeExplicit() && !existsSync(resolved.home)) {
+        throw new Error(
+            `$MULTREE_HOME points at a directory that does not exist: ${resolved.home}\n` +
+                `Check the value for typos, create the directory, or unset $MULTREE_HOME to use ${join(homedir(), ".multree")}.`,
+        );
+    }
+    if (!existsSync(resolved.path)) {
+        throw new Error(buildMissingManifestError(resolved));
+    }
+    const config = parse(readFileSync(resolved.path, "utf-8")) as MultreeConfig;
+    validate(config);
+    return { config, path: resolved.path };
+}
+
+function buildMissingManifestError(resolved: ResolvedManifest): string {
+    const aliasNote = resolved.aliased
+        ? ` (profile "${resolved.profile}" is aliased to "${resolved.resolvedProfile}")`
+        : "";
+    return (
+        `No multree manifest at ${resolved.path}${aliasNote}.\n` +
+        `Create it (copy multree.config.example.yaml from the repo) or pick a different profile ` +
+        `with --profile <name> or $MULTREE_PROFILE.`
     );
 }
 

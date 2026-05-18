@@ -39,19 +39,41 @@ Make sure `~/.local/bin` is on `$PATH`. Requires Node 20.6+ and pnpm.
 
 ## Configure
 
-`multree` reads a manifest YAML from, in order:
+`multree` reads a manifest YAML from `<$MULTREE_HOME or ~/.multree>/<profile>.yaml`.
 
-1. `$MULTREE_CONFIG` if set
-2. `~/multree.config.yaml`
+The profile name is resolved in order:
 
-Start by copying the example into your home directory:
+1. `--profile <name>` CLI flag
+2. `$MULTREE_PROFILE` env var
+3. `"default"`
+
+Then `aliases.json` in the same directory (one hop) gives the resolved profile name (see [Profiles](#profiles) below).
+
+Start by copying the example into your `~/.multree/` directory:
 
 ```bash
-cp multree.config.example.yaml ~/multree.config.yaml
-$EDITOR ~/multree.config.yaml
+mkdir -p ~/.multree
+cp multree.config.example.yaml ~/.multree/default.yaml
+$EDITOR ~/.multree/default.yaml
 ```
 
-The repo only ships `multree.config.example.yaml`; your personal `~/multree.config.yaml` lives outside the repo so the tool stays generic.
+The repo only ships `multree.config.example.yaml`; your personal profile yamls live outside the repo so the tool stays generic.
+
+### Profiles
+
+Keep multiple discrete manifests — one per employer, project, or experiment — under `~/.multree/`:
+
+```
+~/.multree/
+  default.yaml         # loaded when nothing is set
+  work.yaml            # multree --profile work list
+  personal.yaml
+  aliases.json         # optional: { "default": "work", "wip": "personal" }
+```
+
+`multree profile list|path|alias|unalias` manages the directory. To switch your default profile, alias `default` to it: `multree profile alias default work` makes every unflagged command load `work.yaml`. `multree profile unalias default` restores the literal default. Aliases are one-hop only — `multree profile alias` rejects creating a chain.
+
+`$MULTREE_HOME` overrides the entire directory location (useful for CI, or for keeping separate isolated installs). It must point at an existing directory.
 
 ### Manifest shape
 
@@ -136,6 +158,7 @@ multree update <name> [--strategy rebase|merge]
 multree push <name> [--set-upstream]
 multree rewire <name>
 multree destroy <name>
+multree profile [list|path|alias|unalias]
 multree --version
 multree --help
 ```

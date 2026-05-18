@@ -18,6 +18,7 @@ import type {
     MainCheckoutAction,
     MultreeConfig,
     PrimeArtifactSpec,
+    ToolConfig,
 } from "../../src/types.ts";
 
 export interface FakeRepoSpec {
@@ -65,17 +66,16 @@ export interface SandboxOptions {
     jobs?: number;
     parallelSetup?: boolean;
     hookTimeout?: string | number;
+    tools?: Record<string, ToolConfig>;
 }
 
-export interface Sandbox {
-    root: string;
+// Rich per-profile handle. Returned by `createMultiProfileSandbox().profile(name)`
+// and also flattened onto the top-level `Sandbox` for the single-profile case.
+export interface ProfileHandle {
+    name: string;
+    manifestPath: string;
     reposRoot: string;
     worktreeRoot: string;
-    manifestPath: string;
-    traceLog: string;
-    env: NodeJS.ProcessEnv;
-    cleanup: () => void;
-    trace: () => string[];
     state: (group: string) => GroupState | null;
     repoPath: (key: string) => string;
     worktreePath: (group: string, key: string) => string;
@@ -84,9 +84,31 @@ export interface Sandbox {
     advanceDevelop: (key: string, marker?: string) => void;
     // Run a git command in the source repo (under `develop` by default).
     gitInRepo: (key: string, cmd: string) => string;
-    // Read a file from the bare remote (only valid for repos created with
-    // withRemote: true). Returns null if the file isn't present on origin.
+    // True iff this profile's source repo (with `withRemote: true`) has the
+    // given branch in its bare remote.
     remoteHasBranch: (key: string, branch: string) => boolean;
+}
+
+export interface Sandbox extends Omit<ProfileHandle, "name"> {
+    root: string;
+    traceLog: string;
+    env: NodeJS.ProcessEnv;
+    cleanup: () => void;
+    trace: () => string[];
+}
+
+export interface MultiProfileSandboxOptions {
+    profiles: Record<string, SandboxOptions>;
+    aliases?: Record<string, string>;
+}
+
+export interface MultiProfileSandbox {
+    root: string;
+    home: string;
+    env: NodeJS.ProcessEnv;
+    cleanup: () => void;
+    profile: (name: string) => ProfileHandle;
+    writeAliases: (aliases: Record<string, string>) => void;
 }
 
 const TRACE_VAR = "MULTREE_TEST_LOG";
@@ -144,18 +166,9 @@ function initFakeRepo(repoDir: string, spec: FakeRepoSpec, reposRoot: string): v
     }
 }
 
-export function createSandbox(opts: SandboxOptions): Sandbox {
-    const root = mkdtempSync(join(tmpdir(), "multree-sandbox-"));
-    const reposRoot = join(root, "repos");
-    const worktreeRoot = join(root, "worktree");
-    mkdirSync(reposRoot, { recursive: true });
-    mkdirSync(worktreeRoot, { recursive: true });
-
-    const traceLog = join(root, "trace.log");
-    writeFileSync(traceLog, "");
-
+function buildRepoMap(specs: FakeRepoSpec[], reposRoot: string): MultreeConfig["repos"] {
     const repos: MultreeConfig["repos"] = {};
-    for (const spec of opts.repos) {
+    for (const spec of specs) {
         const dirname = spec.dirname ?? spec.key;
         const repoDir = join(reposRoot, dirname);
         initFakeRepo(repoDir, spec, reposRoot);
@@ -191,40 +204,87 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             prime_artifacts: spec.primeArtifacts,
         };
     }
+    return repos;
+}
 
+interface SandboxRoot {
+    root: string;
+    home: string;
+    traceLog: string;
+    env: NodeJS.ProcessEnv;
+    cleanup: () => void;
+}
+
+// Tmpdir + MULTREE_HOME + trace log + env. Shared scaffold for both the single-
+// and multi-profile public entrypoints. Everything sandbox-wide that isn't
+// per-profile lives here.
+function createSandboxRoot(prefix: string): SandboxRoot {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    const home = join(root, "home");
+    mkdirSync(home, { recursive: true });
+    const traceLog = join(root, "trace.log");
+    writeFileSync(traceLog, "");
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        MULTREE_HOME: home,
+        [TRACE_VAR]: traceLog,
+    };
+    delete env.MULTREE_PROFILE;
+    return {
+        root,
+        home,
+        traceLog,
+        env,
+        cleanup() {
+            rmSync(root, { recursive: true, force: true });
+        },
+    };
+}
+
+// Build one profile yaml + its repo fixtures under `parent`. Returns the rich
+// handle every test needs (state, repoPath, worktreePath, advanceDevelop,
+// gitInRepo, remoteHasBranch). Single- and multi-profile sandboxes both call
+// this for each profile they own.
+function createProfileFixture(
+    parent: string,
+    home: string,
+    name: string,
+    opts: SandboxOptions,
+): ProfileHandle {
+    const reposRoot = join(parent, `repos-${name}`);
+    const worktreeRoot = join(parent, `worktree-${name}`);
+    mkdirSync(reposRoot, { recursive: true });
+    mkdirSync(worktreeRoot, { recursive: true });
+
+    const repos = buildRepoMap(opts.repos, reposRoot);
     const config: MultreeConfig = {
         version: 1,
         worktree_root: worktreeRoot,
         repos,
+        tools: opts.tools,
         update_strategy: opts.updateStrategy,
         main_checkout_action: opts.mainCheckoutAction,
         jobs: opts.jobs,
         parallel_setup: opts.parallelSetup,
         hook_timeout: opts.hookTimeout,
     };
-
-    const manifestPath = join(root, "multree.config.yaml");
+    const manifestPath = join(home, `${name}.yaml`);
     writeFileSync(manifestPath, stringify(config));
 
-    const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        MULTREE_CONFIG: manifestPath,
-        [TRACE_VAR]: traceLog,
+    const findSpec = (key: string): FakeRepoSpec => {
+        const spec = opts.repos.find(r => r.key === key);
+        if (!spec) {
+            throw new Error(`Unknown repo in profile ${name}: ${key}`);
+        }
+        return spec;
     };
+    const dirFor = (key: string): string => join(reposRoot, findSpec(key).dirname ?? key);
 
     return {
-        root,
+        name,
+        manifestPath,
         reposRoot,
         worktreeRoot,
-        manifestPath,
-        traceLog,
-        env,
-        cleanup() {
-            rmSync(root, { recursive: true, force: true });
-        },
-        trace() {
-            return readFileSync(traceLog, "utf-8").split("\n").filter(Boolean);
-        },
         state(group: string) {
             const p = join(worktreeRoot, group, ".multree.json");
             if (!existsSync(p)) {
@@ -233,25 +293,14 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             return JSON.parse(readFileSync(p, "utf-8")) as GroupState;
         },
         repoPath(key: string) {
-            const spec = opts.repos.find(r => r.key === key);
-            if (!spec) {
-                throw new Error(`Unknown repo in sandbox: ${key}`);
-            }
-            return join(reposRoot, spec.dirname ?? spec.key);
+            return dirFor(key);
         },
         worktreePath(group: string, key: string) {
-            const spec = opts.repos.find(r => r.key === key);
-            if (!spec) {
-                throw new Error(`Unknown repo in sandbox: ${key}`);
-            }
-            return join(worktreeRoot, group, spec.dirname ?? spec.key);
+            return join(worktreeRoot, group, findSpec(key).dirname ?? key);
         },
         advanceDevelop(key: string, marker?: string) {
-            const spec = opts.repos.find(r => r.key === key);
-            if (!spec) {
-                throw new Error(`Unknown repo in sandbox: ${key}`);
-            }
-            const repoDir = join(reposRoot, spec.dirname ?? spec.key);
+            const spec = findSpec(key);
+            const repoDir = dirFor(key);
             const tag = marker ?? `advance-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
             const file = `develop-${tag}.txt`;
             writeFileSync(join(repoDir, file), `${tag}\n`);
@@ -262,15 +311,11 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             }
         },
         gitInRepo(key: string, cmd: string) {
-            const spec = opts.repos.find(r => r.key === key);
-            if (!spec) {
-                throw new Error(`Unknown repo in sandbox: ${key}`);
-            }
-            return gitOut(join(reposRoot, spec.dirname ?? spec.key), cmd);
+            return gitOut(dirFor(key), cmd);
         },
         remoteHasBranch(key: string, branch: string) {
-            const spec = opts.repos.find(r => r.key === key);
-            if (!spec || !spec.withRemote) {
+            const spec = findSpec(key);
+            if (!spec.withRemote) {
                 return false;
             }
             const remoteDir = join(reposRoot, `${spec.dirname ?? spec.key}.git`);
@@ -283,6 +328,64 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
             } catch {
                 return false;
             }
+        },
+    };
+}
+
+function writeAliasesJson(home: string, aliases: Record<string, string>): void {
+    const ordered: Record<string, string> = {};
+    for (const k of Object.keys(aliases).sort()) {
+        ordered[k] = aliases[k];
+    }
+    writeFileSync(join(home, "aliases.json"), JSON.stringify(ordered, null, 2) + "\n");
+}
+
+export function createSandbox(opts: SandboxOptions): Sandbox {
+    const r = createSandboxRoot("multree-sandbox-");
+    const profile = createProfileFixture(r.root, r.home, "default", opts);
+    return {
+        root: r.root,
+        traceLog: r.traceLog,
+        env: r.env,
+        cleanup: r.cleanup,
+        trace() {
+            return readFileSync(r.traceLog, "utf-8").split("\n").filter(Boolean);
+        },
+        manifestPath: profile.manifestPath,
+        reposRoot: profile.reposRoot,
+        worktreeRoot: profile.worktreeRoot,
+        state: profile.state,
+        repoPath: profile.repoPath,
+        worktreePath: profile.worktreePath,
+        advanceDevelop: profile.advanceDevelop,
+        gitInRepo: profile.gitInRepo,
+        remoteHasBranch: profile.remoteHasBranch,
+    };
+}
+
+export function createMultiProfileSandbox(opts: MultiProfileSandboxOptions): MultiProfileSandbox {
+    const r = createSandboxRoot("multree-sandbox-multi-");
+    const handles: Record<string, ProfileHandle> = {};
+    for (const [name, profileOpts] of Object.entries(opts.profiles)) {
+        handles[name] = createProfileFixture(r.root, r.home, name, profileOpts);
+    }
+    if (opts.aliases) {
+        writeAliasesJson(r.home, opts.aliases);
+    }
+    return {
+        root: r.root,
+        home: r.home,
+        env: r.env,
+        cleanup: r.cleanup,
+        profile(name: string) {
+            const h = handles[name];
+            if (!h) {
+                throw new Error(`Unknown profile in sandbox: ${name}`);
+            }
+            return h;
+        },
+        writeAliases(aliases: Record<string, string>) {
+            writeAliasesJson(r.home, aliases);
         },
     };
 }

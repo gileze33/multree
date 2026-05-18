@@ -6,13 +6,14 @@ import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { destroyCommand } from "./commands/destroy.ts";
 import { listCommand } from "./commands/list.ts";
+import { profileCommand } from "./commands/profile.ts";
 import { pushCommand } from "./commands/push.ts";
 import { removeCommand } from "./commands/remove.ts";
 import { rewireCommand } from "./commands/rewire.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { updateCommand } from "./commands/update.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, setProfileFromFlag } from "./config.ts";
 import { toolCommand } from "./tools.ts";
 import type { UpdateStrategy } from "./types.ts";
 import { kickBackgroundCheck, notifyIfNewer, runUpdateCheck } from "./update-check.ts";
@@ -28,12 +29,35 @@ const BUILTIN_COMMANDS = new Set([
     "update",
     "status",
     "push",
+    "profile",
     "help",
     "--help",
     "-h",
     "--version",
     "-v",
 ]);
+
+// Global flags consumed before subcommand dispatch. Stripped from argv and
+// stashed in module-level state in config.ts so command modules don't need to
+// thread them through, and so they don't leak into child processes (tool
+// dispatch, the background update check) via process.env.
+function stripGlobalFlags(argv: string[]): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--profile") {
+            const value = argv[i + 1];
+            if (value === undefined || value.startsWith("--")) {
+                throw new Error(`--profile requires a value`);
+            }
+            setProfileFromFlag(value);
+            i++;
+            continue;
+        }
+        out.push(a);
+    }
+    return out;
+}
 
 function readVersion(): string {
     try {
@@ -52,7 +76,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(): ParsedArgs {
-    const argv = process.argv.slice(2);
+    const argv = stripGlobalFlags(process.argv.slice(2));
     const cmd = argv[0] ?? "help";
     const positional: string[] = [];
     const flags: Record<string, string | true> = {};
@@ -89,6 +113,8 @@ function help(): void {
     console.log(`multree — multi-repo git worktree group orchestrator
 
 Usage:
+  multree [--profile <name>] <command> [...]
+
   multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
                                                   [--jobs <N>] [--plan] [--resume] [--verbose]
   multree add <name> <repo> [--verbose]
@@ -100,8 +126,10 @@ Usage:
   multree push <name> [--set-upstream]
   multree rewire <name>
   multree destroy <name>
+  multree profile [list|path|alias|unalias]
 ${toolsLine}
-Manifest: $MULTREE_CONFIG, or ~/multree.config.yaml by default.
+Manifest: <$MULTREE_HOME or ~/.multree>/<profile>.yaml. Profile resolution:
+  --profile <name>  >  $MULTREE_PROFILE  >  "default"  (then aliases.json, one hop).
 State: each group's .multree.json inside its group folder under worktree_root.
 `);
 }
@@ -156,20 +184,20 @@ function collectFromOverrides(
 }
 
 async function main(): Promise<void> {
-    const { cmd, positional, flags } = parseArgs();
-
-    // Hidden subcommand used by the detached background process. Never emits
-    // output and never recurses into the user-facing notify/kick flow.
-    if (cmd === "__update-check") {
-        await runUpdateCheck();
-        return;
-    }
-
-    const version = readVersion();
-    notifyIfNewer(version);
-    kickBackgroundCheck();
-
     try {
+        const { cmd, positional, flags } = parseArgs();
+
+        // Hidden subcommand used by the detached background process. Never emits
+        // output and never recurses into the user-facing notify/kick flow.
+        if (cmd === "__update-check") {
+            await runUpdateCheck();
+            return;
+        }
+
+        const version = readVersion();
+        notifyIfNewer(version);
+        kickBackgroundCheck();
+
         switch (cmd) {
             case "create": {
                 const name = requireGroup(positional, "create");
@@ -242,6 +270,9 @@ async function main(): Promise<void> {
                 break;
             case "destroy":
                 await destroyCommand(requireGroup(positional, "destroy"));
+                break;
+            case "profile":
+                profileCommand(positional);
                 break;
             case "help":
             case "--help":
