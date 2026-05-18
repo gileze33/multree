@@ -66,6 +66,27 @@ describe("push", () => {
         assert.match(second.stdout, /✓ api \(multree\/g\)/);
     });
 
+    it("only pushes repos named in --include", () => {
+        runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+
+        const r = runMultree(sb, ["push", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /✓ api \(multree\/g\)/);
+        assert.doesNotMatch(r.stdout, /frontend/);
+
+        assert.ok(sb.remoteHasBranch("api", "multree/g"));
+        assert.equal(sb.remoteHasBranch("frontend", "multree/g"), false);
+    });
+
+    it("rejects --include values that are not members of the group", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+
+        const r = runMultree(sb, ["push", "g", "--include", "api,frontend"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /--include lists repos not in group "g": frontend/);
+        assert.equal(sb.remoteHasBranch("api", "multree/g"), false);
+    });
+
     it("errors when the group does not exist", () => {
         const r = runMultree(sb, ["push", "ghost"]);
         assert.notEqual(r.status, 0);

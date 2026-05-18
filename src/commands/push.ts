@@ -7,6 +7,7 @@ interface PushArgs {
     name: string;
     setUpstream?: boolean;
     force?: boolean;
+    include?: string[];
 }
 
 export function pushCommand(args: PushArgs): void {
@@ -16,8 +17,21 @@ export function pushCommand(args: PushArgs): void {
         throw new Error(`Group not found: ${args.name}`);
     }
 
+    if (args.include && args.include.length > 0) {
+        const unknown = args.include.filter(r => !group.members[r]);
+        if (unknown.length > 0) {
+            throw new Error(
+                `--include lists repos not in group "${group.name}": ${unknown.join(", ")}`,
+            );
+        }
+    }
+    const includeSet = args.include && args.include.length > 0 ? new Set(args.include) : null;
+
     const outcomes: SummaryOutcome[] = [];
     for (const [repoName, member] of Object.entries(group.members)) {
+        if (includeSet && !includeSet.has(repoName)) {
+            continue;
+        }
         const repoCfg = config.repos[repoName];
         if (!repoCfg) {
             console.warn(`[${repoName}] no longer in config; skipping`);

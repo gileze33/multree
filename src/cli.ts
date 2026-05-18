@@ -127,7 +127,7 @@ Usage:
   multree show <name>
   multree status <name> [--fetch]
   multree update <name> [--strategy rebase|merge]
-  multree push <name> [--set-upstream] [--force|-f]
+  multree push <name> [--include <repo,...>] [--set-upstream] [--force|-f]
   multree rewire <name>
   multree destroy <name>
   multree profile [list|path|alias|unalias]
@@ -263,13 +263,18 @@ async function main(): Promise<void> {
                     strategy: parseStrategy(flags.strategy),
                 });
                 break;
-            case "push":
+            case "push": {
+                const include = typeof flags.include === "string"
+                    ? flags.include.split(",").map(s => s.trim()).filter(Boolean)
+                    : undefined;
                 pushCommand({
                     name: requireGroup(positional, "push"),
                     setUpstream: flags["set-upstream"] === true,
                     force: flags.force === true || flags.f === true,
+                    include,
                 });
                 break;
+            }
             case "rewire":
                 rewireCommand(requireGroup(positional, "rewire"));
                 break;
