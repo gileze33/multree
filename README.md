@@ -155,7 +155,7 @@ multree list
 multree show <name>
 multree status <name> [--fetch]
 multree update <name> [--strategy rebase|merge]
-multree push <name> [--set-upstream]
+multree push <name> [--set-upstream] [--force|-f]
 multree rewire <name>
 multree destroy <name>
 multree profile [list|path|alias|unalias]
@@ -175,7 +175,7 @@ Hooks run phase-by-phase across all members: `prime_artifacts` → `install` →
 
 `update` fetches each member's source repo, then rebases or merges that repo's `branch_base` into the member's branch. Strategy precedence: `--strategy` flag → per-repo `update_strategy` → manifest-level `update_strategy` → `rebase`. Members with a dirty working tree are skipped and reported at the end. If a rebase or merge fails the operation is aborted in that worktree (no half-applied state) and the command exits non-zero.
 
-`push` pushes every member's current branch to `origin`, automatically applying `--set-upstream` on first push. Repos with `push: false` in the manifest are skipped (use for read-only mirrors). Any failed push surfaces in the summary and exits non-zero.
+`push` pushes every member's current branch to `origin`, automatically applying `--set-upstream` on first push. `--force` (or `-f`) passes `--force` through to each `git push`. Repos with `push: false` in the manifest are skipped (use for read-only mirrors). Any failed push surfaces in the summary and exits non-zero.
 
 `rewire` re-reads exposes and re-applies consumes. Use after editing the manifest or if env files drift.
 

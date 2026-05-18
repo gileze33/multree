@@ -6,6 +6,7 @@ import { exitIfAnyFailed, indent, printSummary, type SummaryOutcome } from "./_o
 interface PushArgs {
     name: string;
     setUpstream?: boolean;
+    force?: boolean;
 }
 
 export function pushCommand(args: PushArgs): void {
@@ -36,8 +37,11 @@ export function pushCommand(args: PushArgs): void {
             continue;
         }
 
-        console.log(`\n[${repoName}] pushing ${branch}`);
-        const result = pushBranch(member.path, branch, { setUpstream: args.setUpstream });
+        console.log(`\n[${repoName}] pushing ${branch}${args.force ? " (force)" : ""}`);
+        const result = pushBranch(member.path, branch, {
+            setUpstream: args.setUpstream,
+            force: args.force,
+        });
         if (result.output.trim()) {
             console.log(indent(result.output.trim(), "  "));
         }
