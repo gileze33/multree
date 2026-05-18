@@ -128,6 +128,10 @@ function aliasProfile(name: string, target: string): void {
                 `Aliases must be one-hop only.`,
         );
     }
+    const targetPath = profileFilePath(home, target);
+    if (!existsSync(targetPath)) {
+        throw new Error(`Cannot alias ${name} -> ${target}: ${target} has no manifest at ${targetPath}`);
+    }
     aliases[name] = target;
     writeAliases(aliasesPath(home), aliases);
     console.log(`aliased ${name} -> ${target}`);

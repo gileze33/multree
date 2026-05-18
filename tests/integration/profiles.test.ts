@@ -129,6 +129,15 @@ describe("multree profile aliases", () => {
         assert.equal(back.stdout.trim(), sb.profile("default").manifestPath);
     });
 
+    it("rejects an alias target that has no yaml on disk", () => {
+        const r = runMultree(sb, ["profile", "alias", "default", "ghost"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /ghost.*no manifest/);
+        // The alias must not be persisted on failure.
+        const after = runMultree(sb, ["profile", "path"]);
+        assert.equal(after.stdout.trim(), sb.profile("default").manifestPath);
+    });
+
     it("rejects self-alias", () => {
         const r = runMultree(sb, ["profile", "alias", "default", "default"]);
         assert.notEqual(r.status, 0);
