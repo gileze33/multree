@@ -159,6 +159,7 @@ multree push <name> [--set-upstream]
 multree rewire <name>
 multree destroy <name>
 multree profile [list|path|alias|unalias]
+multree shell <name> [<repo>]
 multree --version
 multree --help
 ```
@@ -180,6 +181,8 @@ Hooks run phase-by-phase across all members: `prime_artifacts` → `install` →
 `rewire` re-reads exposes and re-applies consumes. Use after editing the manifest or if env files drift.
 
 `destroy` runs `teardown` hooks, removes the worktrees, then deletes the group folder.
+
+`shell` opens an interactive shell (`$SHELL`, falling back to `/bin/sh`) in the group folder, or in a specific member's worktree if a repo key is given.
 
 Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.g. `multree code feature-x` opens the group in your editor.
 
