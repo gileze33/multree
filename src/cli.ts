@@ -10,6 +10,7 @@ import { profileCommand } from "./commands/profile.ts";
 import { pushCommand } from "./commands/push.ts";
 import { removeCommand } from "./commands/remove.ts";
 import { rewireCommand } from "./commands/rewire.ts";
+import { shellCommand } from "./commands/shell.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { updateCommand } from "./commands/update.ts";
@@ -30,6 +31,7 @@ const BUILTIN_COMMANDS = new Set([
     "status",
     "push",
     "profile",
+    "shell",
     "help",
     "--help",
     "-h",
@@ -127,6 +129,7 @@ Usage:
   multree rewire <name>
   multree destroy <name>
   multree profile [list|path|alias|unalias]
+  multree shell <name> [<repo>]
 ${toolsLine}
 Manifest: <$MULTREE_HOME or ~/.multree>/<profile>.yaml. Profile resolution:
   --profile <name>  >  $MULTREE_PROFILE  >  "default"  (then aliases.json, one hop).
@@ -274,6 +277,11 @@ async function main(): Promise<void> {
             case "profile":
                 profileCommand(positional);
                 break;
+            case "shell": {
+                const name = requireGroup(positional, "shell");
+                shellCommand(name, positional[1]);
+                break;
+            }
             case "help":
             case "--help":
             case "-h":
