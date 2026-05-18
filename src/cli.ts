@@ -93,6 +93,10 @@ function parseArgs(): ParsedArgs {
                 flags[key] = next;
                 i++;
             }
+        } else if (a.startsWith("-") && a.length > 1 && !/^-\d/.test(a)) {
+            // Short flags are boolean only — no value form. `-f` is recorded
+            // as `flags.f = true`; subcommands map it onto a long name.
+            flags[a.slice(1)] = true;
         } else {
             positional.push(a);
         }
@@ -125,7 +129,7 @@ Usage:
   multree show <name>
   multree status <name> [--fetch]
   multree update <name> [--strategy rebase|merge]
-  multree push <name> [--set-upstream]
+  multree push <name> [--include <repo,...>] [--set-upstream] [--force|-f]
   multree rewire <name>
   multree destroy <name>
   multree profile [list|path|alias|unalias]
@@ -262,12 +266,18 @@ async function main(): Promise<void> {
                     strategy: parseStrategy(flags.strategy),
                 });
                 break;
-            case "push":
+            case "push": {
+                const include = typeof flags.include === "string"
+                    ? flags.include.split(",").map(s => s.trim()).filter(Boolean)
+                    : undefined;
                 pushCommand({
                     name: requireGroup(positional, "push"),
                     setUpstream: flags["set-upstream"] === true,
+                    force: flags.force === true || flags.f === true,
+                    include,
                 });
                 break;
+            }
             case "rewire":
                 rewireCommand(requireGroup(positional, "rewire"));
                 break;

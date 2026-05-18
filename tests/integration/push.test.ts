@@ -66,10 +66,63 @@ describe("push", () => {
         assert.match(second.stdout, /✓ api \(multree\/g\)/);
     });
 
+    it("only pushes repos named in --include", () => {
+        runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+
+        const r = runMultree(sb, ["push", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /✓ api \(multree\/g\)/);
+        assert.doesNotMatch(r.stdout, /frontend/);
+
+        assert.ok(sb.remoteHasBranch("api", "multree/g"));
+        assert.equal(sb.remoteHasBranch("frontend", "multree/g"), false);
+    });
+
+    it("rejects --include values that are not members of the group", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+
+        const r = runMultree(sb, ["push", "g", "--include", "api,frontend"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /--include lists repos not in group "g": frontend/);
+        assert.equal(sb.remoteHasBranch("api", "multree/g"), false);
+    });
+
     it("errors when the group does not exist", () => {
         const r = runMultree(sb, ["push", "ghost"]);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /Group not found: ghost/);
+    });
+
+    // After an initial push, rewriting history locally (here via amend) makes
+    // the local branch diverge from origin. A plain push is rejected by git;
+    // --force / -f rewrites the remote.
+    it("force-pushes when --force is passed", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(runMultree(sb, ["push", "g"]).status, 0);
+
+        const wt = sb.worktreePath("g", "api");
+        execSync(`git -C "${wt}" commit --amend --no-edit --allow-empty`, { stdio: "pipe" });
+
+        const rejected = runMultree(sb, ["push", "g"]);
+        assert.notEqual(rejected.status, 0);
+        assert.match(rejected.stdout, /✗ api: push failed/);
+
+        const forced = runMultree(sb, ["push", "g", "--force"]);
+        assert.equal(forced.status, 0, forced.stderr);
+        assert.match(forced.stdout, /✓ api \(multree\/g\)/);
+        assert.match(forced.stdout, /pushing multree\/g \(force\)/);
+    });
+
+    it("accepts -f as a short form of --force", () => {
+        runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(runMultree(sb, ["push", "g"]).status, 0);
+
+        const wt = sb.worktreePath("g", "api");
+        execSync(`git -C "${wt}" commit --amend --no-edit --allow-empty`, { stdio: "pipe" });
+
+        const forced = runMultree(sb, ["push", "g", "-f"]);
+        assert.equal(forced.status, 0, forced.stderr);
+        assert.match(forced.stdout, /pushing multree\/g \(force\)/);
     });
 
     // currentBranch returns null on a detached worktree, so push falls back

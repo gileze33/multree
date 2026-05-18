@@ -362,6 +362,7 @@ export function mergeFrom(worktreePath: string, baseRef: string): RebaseResult {
 export interface PushOptions {
     setUpstream?: boolean;
     remote?: string;
+    force?: boolean;
 }
 
 export function pushBranch(
@@ -374,6 +375,9 @@ export function pushBranch(
     const args = ["push"];
     if (upstream) {
         args.push("--set-upstream");
+    }
+    if (opts.force) {
+        args.push("--force");
     }
     args.push(remote, branch);
     return gitTry(worktreePath, args);
