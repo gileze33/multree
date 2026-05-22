@@ -183,11 +183,47 @@ function validateDependsOn(cfg: MultreeConfig): void {
     }
 }
 
+// Matches `${NAME}` references. Captures everything up to the next `}` so we
+// can validate the name explicitly and report the bad token in the error,
+// rather than silently leaving e.g. `${a b}` untouched.
+const ENV_VAR_PLACEHOLDER_RE = /\$\{([^}]*)\}/g;
+const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function expandEnvVars(p: string): string {
+    return p.replace(ENV_VAR_PLACEHOLDER_RE, (_match, name: string) => {
+        if (!ENV_VAR_NAME_RE.test(name)) {
+            throw new Error(
+                `Invalid env var name "${name}" in manifest path "${p}" ` +
+                    `(expected ${ENV_VAR_NAME_RE.source})`,
+            );
+        }
+        const value = process.env[name];
+        // Empty string is treated as undefined on purpose: silently substituting
+        // "" turns `${BASE}/api` into `/api`, which is exactly the dangerous
+        // case (worktree created in the wrong place, or destroy/teardown
+        // pointed at the wrong tree).
+        if (value === undefined || value === "") {
+            throw new Error(
+                `Env var "${name}" referenced in manifest path "${p}" is unset or empty ` +
+                    `(export ${name} or remove the placeholder).`,
+            );
+        }
+        return value;
+    });
+}
+
+// Resolves `${VAR}` references first, then a leading `~/`. Env expansion is
+// deliberately limited to this function so it only applies to the two fields
+// every caller routes through here: top-level `worktree_root` (via
+// resolveWorktreeRoot) and per-repo `path`. Hook command strings, prime_artifact
+// paths, tools commands, etc. never pass through expandPath, so a `${VAR}`
+// literal there stays intact for the shell to handle at execution time.
 export function expandPath(p: string): string {
-    if (p.startsWith("~/")) {
-        return join(homedir(), p.slice(2));
+    const withEnv = expandEnvVars(p);
+    if (withEnv.startsWith("~/")) {
+        return join(homedir(), withEnv.slice(2));
     }
-    return p;
+    return withEnv;
 }
 
 export function resolveWorktreeRoot(cfg: MultreeConfig): string {
