@@ -28,18 +28,28 @@ function substituteCwd(template: string, cwd: string): string {
 }
 
 // OSC 0: set icon + window title, terminated by BEL. iTerm maps this to the
-// session name, which drives the tab title for the active pane. Group names
-// are validated to [a-zA-Z0-9._-]+ upstream, so the value can't smuggle a BEL
-// or other control byte that would break out of the sequence.
+// session name, which drives the tab title for the active pane. Tool names
+// come from manifest keys and group names are validated to [a-zA-Z0-9._-]+,
+// so neither can smuggle a control byte that breaks out of the sequence.
 export function terminalTitleSequence(title: string): string {
-    return `]0;${title}`;
+    return `\x1b]0;${title}\x07`;
 }
 
-function setTerminalTitle(title: string): void {
+// iTerm2 proprietary OSC 1337 badge: a label painted over the pane,
+// independent of the title, so an inner app that rewrites the title (e.g.
+// `claude`) can't clobber it. The format string is base64-encoded. Other
+// terminals ignore the unknown OSC.
+export function itermBadgeSequence(text: string): string {
+    const encoded = Buffer.from(text, "utf-8").toString("base64");
+    return `\x1b]1337;SetBadgeFormat=${encoded}\x07`;
+}
+
+function applyTerminalContext(toolName: string, groupName: string): void {
     if (!process.stdout.isTTY) {
         return;
     }
-    process.stdout.write(terminalTitleSequence(title));
+    process.stdout.write(terminalTitleSequence(`${toolName}: ${groupName}`));
+    process.stdout.write(itermBadgeSequence(groupName));
 }
 
 function runShellCommand(command: string, cwd: string): void {
@@ -69,7 +79,7 @@ export function toolCommand(toolName: string, groupName: string): void {
 
     const cwd = resolveCwd(config, group, tool.open_in);
     console.log(`${toolName}: ${cwd}`);
-    setTerminalTitle(group.name);
+    applyTerminalContext(toolName, group.name);
 
     try {
         if (Array.isArray(tool.command)) {
