@@ -10,6 +10,35 @@
 // This is intentionally minimal — no priority queues, no cancellation tokens.
 // Callers wanting to abort mid-run pass an AbortSignal through `work` itself.
 
+// Run `work` over `items` with at most `jobs` tasks in flight, returning
+// results in input order. Unlike runScheduled this is dependency-free and does
+// no failure propagation: every item runs, and a rejection rejects the whole
+// pool. For independent read-only fan-outs (e.g. `list` probing every
+// worktree's git state) the scheduler's skip-on-failure semantics are wrong —
+// one unreadable worktree shouldn't mark its siblings "skipped" — so reach for
+// this instead.
+export async function mapPool<T, R>(
+    items: readonly T[],
+    jobs: number,
+    work: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+    const limit = Math.max(1, jobs | 0);
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    async function worker(): Promise<void> {
+        for (;;) {
+            const i = cursor++;
+            if (i >= items.length) {
+                return;
+            }
+            results[i] = await work(items[i], i);
+        }
+    }
+    const count = Math.min(limit, items.length);
+    await Promise.all(Array.from({ length: count }, () => worker()));
+    return results;
+}
+
 export type TaskOutcome = "ok" | "failed" | "skipped";
 
 export interface TaskResult {
