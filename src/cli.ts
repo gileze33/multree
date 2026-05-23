@@ -249,7 +249,7 @@ async function main(): Promise<void> {
                 break;
             }
             case "list":
-                listCommand();
+                await listCommand();
                 break;
             case "show":
                 showCommand(requireGroup(positional, "show"));

@@ -1,5 +1,8 @@
-import { execFileSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { existsSync, realpathSync } from "fs";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 // All git invocations go through execFileSync with an argv array (no shell),
 // so user-controlled values like branch names and paths cannot be
@@ -67,6 +70,10 @@ export function fetchRepo(repoPath: string): void {
     }
 }
 
+// @deprecated Prefer isDirtyAsync. This sync version blocks the event loop on
+// the git subprocess; it survives only for the single-shot callers (branch /
+// update / status pre-flight checks) that aren't worth making async yet. Once
+// those migrate, delete this so isDirtyAsync is the only copy.
 export function isDirty(worktreePath: string): boolean {
     if (!existsSync(worktreePath)) {
         return false;
@@ -78,12 +85,36 @@ export function isDirty(worktreePath: string): boolean {
     }
 }
 
-export function lastCommitTime(worktreePath: string): Date | null {
+// `list` queries dirty state + last commit time for every member of every
+// group; running those git invocations through a bounded pool (rather than
+// back-to-back execFileSync) is what keeps `multree list` snappy as the number
+// of worktrees grows. Same swallow-and-default semantics as the sync isDirty —
+// a single unreadable worktree never fails the listing.
+export async function isDirtyAsync(worktreePath: string): Promise<boolean> {
+    if (!existsSync(worktreePath)) {
+        return false;
+    }
+    try {
+        const { stdout } = await execFileAsync("git", ["status", "--porcelain"], {
+            cwd: worktreePath,
+            encoding: "utf-8",
+        });
+        return stdout.trim().length > 0;
+    } catch {
+        return false;
+    }
+}
+
+export async function lastCommitTimeAsync(worktreePath: string): Promise<Date | null> {
     if (!existsSync(worktreePath)) {
         return null;
     }
     try {
-        const iso = gitCapture(worktreePath, ["log", "-1", "--format=%cI"]).trim();
+        const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%cI"], {
+            cwd: worktreePath,
+            encoding: "utf-8",
+        });
+        const iso = stdout.trim();
         return iso ? new Date(iso) : null;
     } catch {
         return null;

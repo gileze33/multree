@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { runScheduled, topoOrder } from "../../src/scheduler.ts";
+import { mapPool, runScheduled, topoOrder } from "../../src/scheduler.ts";
 
 describe("topoOrder", () => {
     it("returns items unchanged when there are no deps", () => {
@@ -33,6 +33,56 @@ describe("topoOrder", () => {
 
     it("ignores deps that aren't in the item set", () => {
         assert.deepEqual(topoOrder(["a"], { a: ["external"] }), ["a"]);
+    });
+});
+
+describe("mapPool", () => {
+    it("returns results in input order regardless of completion order", async () => {
+        const out = await mapPool([30, 5, 20, 10], 2, async ms => {
+            await new Promise(r => setTimeout(r, ms));
+            return ms * 2;
+        });
+        assert.deepEqual(out, [60, 10, 40, 20]);
+    });
+
+    it("never runs more than `jobs` tasks at once", async () => {
+        let inFlight = 0;
+        let peak = 0;
+        await mapPool(Array.from({ length: 12 }, (_, i) => i), 3, async () => {
+            inFlight++;
+            peak = Math.max(peak, inFlight);
+            await new Promise(r => setTimeout(r, 5));
+            inFlight--;
+        });
+        assert.equal(peak, 3);
+    });
+
+    it("treats jobs < 1 as 1", async () => {
+        let peak = 0;
+        let inFlight = 0;
+        await mapPool([1, 2, 3], 0, async () => {
+            inFlight++;
+            peak = Math.max(peak, inFlight);
+            await new Promise(r => setTimeout(r, 2));
+            inFlight--;
+        });
+        assert.equal(peak, 1);
+    });
+
+    it("returns an empty array for an empty item list", async () => {
+        assert.deepEqual(await mapPool([], 4, async () => 1), []);
+    });
+
+    it("rejects the whole pool when a task throws", async () => {
+        await assert.rejects(
+            mapPool([1, 2, 3], 2, async n => {
+                if (n === 2) {
+                    throw new Error("boom");
+                }
+                return n;
+            }),
+            /boom/,
+        );
     });
 });
 

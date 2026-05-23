@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -60,6 +60,16 @@ describe("list", () => {
         assert.match(r.stdout, /NAME\s+BRANCH/);
         assert.match(r.stdout, /first\s+multree\/first\s+.+\s+api/);
         assert.match(r.stdout, /second\s+multree\/second\s+.+\s+frontend/);
+    });
+
+    it("flags a group dirty when a member worktree has uncommitted changes", () => {
+        runMultree(sb, ["create", "clean", "--include", "api"]);
+        runMultree(sb, ["create", "messy", "--include", "frontend"]);
+        writeFileSync(join(sb.worktreePath("messy", "frontend"), "scratch.txt"), "wip\n");
+        const r = runMultree(sb, ["list"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /messy\s+\S+\s+.+\(dirty\)/);
+        assert.doesNotMatch(r.stdout, /clean\s+\S+\s+.+\(dirty\)/);
     });
 
     it("ignores directories under worktree_root that lack .multree.json", () => {
