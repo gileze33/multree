@@ -27,6 +27,21 @@ function substituteCwd(template: string, cwd: string): string {
     return template.replace(/\{cwd\}/g, cwd);
 }
 
+// OSC 0: set icon + window title, terminated by BEL. iTerm maps this to the
+// session name, which drives the tab title for the active pane. Tool names
+// come from manifest keys and group names are validated to [a-zA-Z0-9._-]+,
+// so neither can smuggle a control byte that breaks out of the sequence.
+export function terminalTitleSequence(title: string): string {
+    return `\x1b]0;${title}\x07`;
+}
+
+function setTerminalTitle(toolName: string, groupName: string): void {
+    if (!process.stdout.isTTY) {
+        return;
+    }
+    process.stdout.write(terminalTitleSequence(`${toolName}: ${groupName}`));
+}
+
 function runShellCommand(command: string, cwd: string): void {
     const resolved = substituteCwd(command, cwd);
     execSync(resolved, { cwd, stdio: "inherit", shell: "/bin/bash" });
@@ -54,6 +69,7 @@ export function toolCommand(toolName: string, groupName: string): void {
 
     const cwd = resolveCwd(config, group, tool.open_in);
     console.log(`${toolName}: ${cwd}`);
+    setTerminalTitle(toolName, group.name);
 
     try {
         if (Array.isArray(tool.command)) {
