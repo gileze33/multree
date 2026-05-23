@@ -35,21 +35,11 @@ export function terminalTitleSequence(title: string): string {
     return `\x1b]0;${title}\x07`;
 }
 
-// iTerm2 proprietary OSC 1337 badge: a label painted over the pane,
-// independent of the title, so an inner app that rewrites the title (e.g.
-// `claude`) can't clobber it. The format string is base64-encoded. Other
-// terminals ignore the unknown OSC.
-export function itermBadgeSequence(text: string): string {
-    const encoded = Buffer.from(text, "utf-8").toString("base64");
-    return `\x1b]1337;SetBadgeFormat=${encoded}\x07`;
-}
-
-function applyTerminalContext(toolName: string, groupName: string): void {
+function setTerminalTitle(toolName: string, groupName: string): void {
     if (!process.stdout.isTTY) {
         return;
     }
     process.stdout.write(terminalTitleSequence(`${toolName}: ${groupName}`));
-    process.stdout.write(itermBadgeSequence(groupName));
 }
 
 function runShellCommand(command: string, cwd: string): void {
@@ -79,7 +69,7 @@ export function toolCommand(toolName: string, groupName: string): void {
 
     const cwd = resolveCwd(config, group, tool.open_in);
     console.log(`${toolName}: ${cwd}`);
-    applyTerminalContext(toolName, group.name);
+    setTerminalTitle(toolName, group.name);
 
     try {
         if (Array.isArray(tool.command)) {
