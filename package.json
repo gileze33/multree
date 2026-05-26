@@ -1,6 +1,6 @@
 {
     "name": "multree-cli",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Multi-repo git worktree group orchestrator: spin up linked worktrees across N repos, run per-repo hooks, prime heavy artifacts via APFS reflinks, and wire consumer env files to values exposed by producer repos.",
     "type": "module",
     "license": "MIT",
