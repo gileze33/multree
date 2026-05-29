@@ -276,10 +276,14 @@ export function computeCandidates(ctx: CompletionContext, rawWords: string[]): s
 // (COMP_WORDS[0] / words[1]) so a non-PATH invocation still self-dispatches.
 export const BASH_COMPLETION = `# multree bash completion — eval "$(multree completion bash)"
 _multree_complete() {
-    local cur args
+    # COMPREPLY=( $(...) ) with IFS=newline rather than mapfile/readarray: the
+    # latter is bash 4.0+, but macOS still ships the system bash 3.2. Group/repo
+    # names are restricted to [A-Za-z0-9._-] so unquoted word-splitting here is
+    # safe (no glob/space surprises).
+    local cur args IFS=$'\\n'
     cur="\${COMP_WORDS[COMP_CWORD]}"
     args=("\${COMP_WORDS[@]:1:COMP_CWORD-1}" "\$cur")
-    mapfile -t COMPREPLY < <("\${COMP_WORDS[0]}" __complete "\${args[@]}" 2>/dev/null)
+    COMPREPLY=($("\${COMP_WORDS[0]}" __complete "\${args[@]}" 2>/dev/null))
 }
 complete -F _multree_complete multree
 `;
