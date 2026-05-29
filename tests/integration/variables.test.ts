@@ -21,10 +21,10 @@ function makeSandbox(min: number, max: number): Sandbox {
                 key: "web",
                 setup: trace("web:setup"),
                 files: { ".env": "" },
-                variables: { port: { type: "number", min, max } },
-                // Fallback for consumers when web isn't part of the group; the
-                // live generated value always wins over this default.
-                defaults: { port: 9999 },
+                // The variable's own `default` is the fallback consumers use
+                // when web isn't in the group; the live generated value always
+                // wins (and rewires them) when it is.
+                variables: { port: { type: "number", min, max, default: 9999 } },
                 consumes: { file: ".env", upsert: { PORT: "{web.port}" } },
             },
             {
@@ -82,6 +82,23 @@ describe("repo variables", () => {
         assert.deepEqual(ledger(sb.home), [
             { profile: "default", group: "g", repo: "web", variable: "port", value: webPort },
         ]);
+    });
+
+    it("falls back to the variable default when the producer isn't included, then rewires on add", () => {
+        // web (the variable owner) is left out; api still resolves {web.port}
+        // via web's variable default.
+        const created = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(created.status, 0, created.stderr);
+        assert.equal(readPort(sb, "g", "api", "WEB_PORT"), 9999, "should use the variable default");
+        assert.deepEqual(ledger(sb.home), [], "no value is allocated while web is absent");
+
+        // Adding web allocates a real value and rewires api to it.
+        const added = runMultree(sb, ["add", "g", "web"]);
+        assert.equal(added.status, 0, added.stderr);
+        const allocated = readPort(sb, "g", "web", "PORT");
+        assert.ok(allocated >= 4000 && allocated <= 4999, `expected an allocated port, got ${allocated}`);
+        assert.notEqual(allocated, 9999, "the allocated value must replace the default");
+        assert.equal(readPort(sb, "g", "api", "WEB_PORT"), allocated, "api must be rewired to the allocated value");
     });
 
     it("gives two groups in the same profile distinct values", () => {

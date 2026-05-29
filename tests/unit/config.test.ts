@@ -277,6 +277,25 @@ describe("loadConfig", () => {
         assert.throws(() => loadConfig(), /min and max must be integers/);
     });
 
+    it("rejects a variable with a non-integer default", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000\n        max: 5000\n        default: 4000.5\n",
+        );
+        assert.throws(() => loadConfig(), /default must be an integer/);
+    });
+
+    it("accepts a variable default outside the allocatable range", () => {
+        // A default can legitimately be a well-known shared port outside the
+        // ephemeral [min, max] allocation window.
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000\n        max: 5000\n        default: 80\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.web.variables?.port.default, 80);
+    });
+
     it("accepts a valid number variable (type defaults to number)", () => {
         writeFileSync(
             join(home, "default.yaml"),

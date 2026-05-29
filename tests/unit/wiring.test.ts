@@ -94,6 +94,45 @@ describe("buildContext", () => {
     });
 });
 
+describe("buildContext with variable defaults", () => {
+    // web has a generated variable with its own fallback; api has both a
+    // variable default and an overriding `defaults` map entry.
+    const config: MultreeConfig = {
+        version: 1,
+        repos: {
+            web: { path: "/x", variables: { port: { type: "number", min: 4000, max: 4999, default: 9999 } } },
+            api: {
+                path: "/y",
+                variables: { port: { type: "number", min: 5000, max: 5999, default: 5555 } },
+                defaults: { port: 5000 },
+            },
+        },
+    };
+
+    it("uses a variable's default for a repo not in the group", () => {
+        const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.web?.port, "9999");
+    });
+
+    it("lets an explicit defaults map entry override the variable default", () => {
+        const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.api?.port, "5000");
+    });
+
+    it("prefers an allocated value over the variable default for a live member", () => {
+        const group: GroupState = {
+            name: "g",
+            branch: "b",
+            created_at: "",
+            members: { web: { repo: "web", path: "/z", exposes: {}, variables: { port: "4002" } } },
+        };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.web?.port, "4002");
+    });
+});
+
 describe("readExposes", () => {
     let dir: string;
     beforeEach(() => {

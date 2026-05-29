@@ -35,6 +35,13 @@ export interface NumberVariableSpec {
     type?: "number";
     min: number;
     max: number;
+    // Fallback value used by consumers when the owning repo is NOT part of the
+    // group (so `{<repo>.<name>}` still resolves). When the repo IS in the
+    // group the allocated value wins and consumers are rewired to it. A
+    // `defaults.<name>` map entry, if present, overrides this. Need not lie
+    // within [min, max] — it can be a well-known shared port outside the
+    // ephemeral allocation range.
+    default?: number;
 }
 
 export type VariableSpec = NumberVariableSpec;

@@ -92,6 +92,10 @@ repos:
         #         type: number
         #         min: 9000
         #         max: 9099
+        #         # Fallback for consumers when this repo isn't in the group;
+        #         # the allocated value wins (and rewires them) when it is. A
+        #         # `defaults.metrics_port` entry below would override this.
+        #         default: 9000
         # Fallback values used when this repo is NOT included in the group --
         # e.g. point frontends at the default dev port.
         defaults:

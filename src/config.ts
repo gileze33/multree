@@ -202,6 +202,9 @@ function validateVariables(repoName: string, repo: RepoConfig): void {
         if (spec.min > spec.max) {
             throw new Error(`${where}: min (${spec.min}) must be <= max (${spec.max})`);
         }
+        if (spec.default !== undefined && !Number.isInteger(spec.default)) {
+            throw new Error(`${where}: default must be an integer`);
+        }
     }
 }
 

@@ -30,11 +30,26 @@ export function buildContext(
 ): Record<string, Record<string, string>> {
     const ctx: Record<string, Record<string, string>> = {};
     for (const [repo, repoCfg] of Object.entries(cfg.repos)) {
-        if (repoCfg.defaults) {
-            ctx[repo] = {};
-            for (const [k, v] of Object.entries(repoCfg.defaults)) {
-                ctx[repo][k] = String(v);
+        // Fallback layer for repos that may not be live members. A variable's
+        // own `default` seeds the value; an explicit `defaults.<key>` map entry
+        // overrides it. Either makes `{<repo>.<key>}` resolvable when the repo
+        // isn't in the group; when it is, the allocated value (merged below)
+        // wins and consumers are rewired to it.
+        const seed: Record<string, string> = {};
+        if (repoCfg.variables) {
+            for (const [k, spec] of Object.entries(repoCfg.variables)) {
+                if (spec.default !== undefined) {
+                    seed[k] = String(spec.default);
+                }
             }
+        }
+        if (repoCfg.defaults) {
+            for (const [k, v] of Object.entries(repoCfg.defaults)) {
+                seed[k] = String(v);
+            }
+        }
+        if (Object.keys(seed).length > 0) {
+            ctx[repo] = seed;
         }
     }
     for (const [repo, member] of Object.entries(group.members)) {
