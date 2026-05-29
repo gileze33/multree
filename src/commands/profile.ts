@@ -27,7 +27,7 @@ function writeAliases(path: string, aliases: Record<string, string>): void {
     writeFileSync(path, JSON.stringify(ordered, null, 2) + "\n");
 }
 
-function listProfileFiles(home: string): string[] {
+export function listProfileFiles(home: string): string[] {
     if (!existsSync(home)) {
         return [];
     }

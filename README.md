@@ -160,6 +160,7 @@ multree rewire <name>
 multree destroy <name>
 multree profile [list|path|alias|unalias]
 multree shell <name> [<repo>]
+multree completion <bash|zsh>
 multree --version
 multree --help
 ```
@@ -185,6 +186,27 @@ Hooks run phase-by-phase across all members: `prime_artifacts` → `install` →
 `shell` opens an interactive shell (`$SHELL`, falling back to `/bin/sh`) in the group folder, or in a specific member's worktree if a repo key is given.
 
 Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.g. `multree code feature-x` opens the group in your editor.
+
+## Shell completion
+
+`multree completion <bash|zsh>` prints a completion script for the named shell. Wire it into your shell profile:
+
+```bash
+# ~/.bashrc
+eval "$(multree completion bash)"
+
+# ~/.zshrc  (after `autoload -Uz compinit && compinit`)
+eval "$(multree completion zsh)"
+```
+
+Completion is **dynamic** — it reads your manifest and group state on every TAB, so it offers live values, not a hardcoded list:
+
+- subcommands and any `tools.<name>` blocks at the first position;
+- existing group names for `show`/`status`/`update`/`push`/`rewire`/`destroy`/`remove`/`add`/`shell` and tool commands;
+- repo keys for `create --include` (comma-aware: `--include api,<TAB>` completes the remaining repos), and a group's own members for `shell`/`remove`/`push --include`;
+- `--strategy rebase|merge`, the `profile` actions, profile names for `--profile` and `profile alias|unalias|path`.
+
+The scripts shell out to a hidden `multree __complete` subcommand that does the work — so completion automatically tracks new subcommands and manifest tools with no script to regenerate. A `--profile <name>` already on the line is honoured, so completion resolves groups against the profile you're targeting. A missing or broken manifest degrades gracefully to completing just the built-in subcommands.
 
 ## Update notifications
 
