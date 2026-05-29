@@ -2,10 +2,11 @@ import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { loadGroup, saveGroup } from "../state.ts";
+import { releaseMemberVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
 export async function removeCommand(groupName: string, repoName: string): Promise<void> {
-    const { config } = loadConfig();
+    const { config, home, profile } = loadConfig();
     const group = loadGroup(config, groupName);
     if (!group) {
         throw new Error(`Group not found: ${groupName}`);
@@ -37,6 +38,8 @@ export async function removeCommand(groupName: string, repoName: string): Promis
     }
 
     delete group.members[repoName];
+    // Free the removed repo's allocated variable values back into the pool.
+    releaseMemberVariables(home, profile, groupName, repoName);
 
     // Re-wire remaining members: removed repo's exposes are gone from the
     // context so frontends fall back to defaults (e.g. api.port -> 5000).

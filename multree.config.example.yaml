@@ -79,6 +79,19 @@ repos:
                 type: env_file
                 file: .env.local
                 key: API_PORT
+        # Variables multree generates and allocates for this repo when it joins
+        # a group. Exposed automatically as {<repo>.<name>} -- no `exposes`
+        # entry needed -- so any repo (including this one, via its own
+        # `consumes`) can reference {api.metrics_port}. The only pattern today
+        # is an integer drawn from an inclusive [min, max] range; the chosen
+        # value is guaranteed unique across every group in every profile (the
+        # ledger lives in <$MULTREE_HOME>/variables.json) and is freed on
+        # remove/destroy.
+        # variables:
+        #     metrics_port:
+        #         type: number
+        #         min: 9000
+        #         max: 9099
         # Fallback values used when this repo is NOT included in the group --
         # e.g. point frontends at the default dev port.
         defaults:

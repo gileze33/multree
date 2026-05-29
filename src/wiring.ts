@@ -38,7 +38,10 @@ export function buildContext(
         }
     }
     for (const [repo, member] of Object.entries(group.members)) {
-        ctx[repo] = { ...(ctx[repo] ?? {}), ...member.exposes };
+        // Precedence within a repo: defaults < generated variables < exposes.
+        // Variables and exposes are both authoritative for live members; if a
+        // repo declares both under the same name, the env-file value wins.
+        ctx[repo] = { ...(ctx[repo] ?? {}), ...(member.variables ?? {}), ...member.exposes };
     }
     return ctx;
 }

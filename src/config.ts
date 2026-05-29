@@ -115,7 +115,17 @@ export function resolveManifest(opts: ResolveOptions = {}): ResolvedManifest {
     };
 }
 
-export function loadConfig(opts: ResolveOptions = {}): { config: MultreeConfig; path: string } {
+export interface LoadedConfig {
+    config: MultreeConfig;
+    path: string;
+    // Resolved profile name (after one alias hop) and the $MULTREE_HOME
+    // directory it was loaded from. Commands thread these into the variables
+    // ledger so allocations are keyed by profile and shared across profiles.
+    profile: string;
+    home: string;
+}
+
+export function loadConfig(opts: ResolveOptions = {}): LoadedConfig {
     const resolved = resolveManifest(opts);
     // Typo-protection: an explicitly-set $MULTREE_HOME pointing at a missing
     // directory is almost always a typo, not a "you haven't set up multree
@@ -131,7 +141,12 @@ export function loadConfig(opts: ResolveOptions = {}): { config: MultreeConfig; 
     }
     const config = parse(readFileSync(resolved.path, "utf-8")) as MultreeConfig;
     validate(config);
-    return { config, path: resolved.path };
+    return {
+        config,
+        path: resolved.path,
+        profile: resolved.resolvedProfile,
+        home: resolved.home,
+    };
 }
 
 function buildMissingManifestError(resolved: ResolvedManifest): string {
@@ -156,8 +171,38 @@ function validate(cfg: MultreeConfig): void {
         if (!repo.path) {
             throw new Error(`Repo "${name}" is missing required field: path`);
         }
+        validateVariables(name, repo);
     }
     validateDependsOn(cfg);
+}
+
+// Variable names share the character class that wiring templates accept for the
+// `{<repo>.<key>}` form, so an allocated value is always referenceable.
+const VARIABLE_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
+function validateVariables(repoName: string, repo: RepoConfig): void {
+    if (!repo.variables) {
+        return;
+    }
+    for (const [varName, spec] of Object.entries(repo.variables)) {
+        const where = `Repo "${repoName}" variable "${varName}"`;
+        if (!VARIABLE_NAME_RE.test(varName)) {
+            throw new Error(
+                `${where}: invalid name (alphanumerics, underscore, hyphen only)`,
+            );
+        }
+        if (spec.type !== undefined && spec.type !== "number") {
+            throw new Error(
+                `${where}: unsupported type "${spec.type}" (only "number" is supported)`,
+            );
+        }
+        if (!Number.isInteger(spec.min) || !Number.isInteger(spec.max)) {
+            throw new Error(`${where}: min and max must be integers`);
+        }
+        if (spec.min > spec.max) {
+            throw new Error(`${where}: min (${spec.min}) must be <= max (${spec.max})`);
+        }
+    }
 }
 
 function validateDependsOn(cfg: MultreeConfig): void {

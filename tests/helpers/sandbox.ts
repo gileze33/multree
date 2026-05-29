@@ -19,6 +19,7 @@ import type {
     MultreeConfig,
     PrimeArtifactSpec,
     ToolConfig,
+    VariableSpec,
 } from "../../src/types.ts";
 
 export interface FakeRepoSpec {
@@ -29,6 +30,7 @@ export interface FakeRepoSpec {
     teardown?: HookSpec;
     files?: Record<string, string>;
     exposes?: Record<string, ExposeSpec>;
+    variables?: Record<string, VariableSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     // Extra branches to create in the source repo before any worktree work.
@@ -91,6 +93,9 @@ export interface ProfileHandle {
 
 export interface Sandbox extends Omit<ProfileHandle, "name"> {
     root: string;
+    // $MULTREE_HOME for this sandbox. The variables ledger lives here
+    // ($MULTREE_HOME/variables.json), shared across profiles.
+    home: string;
     traceLog: string;
     env: NodeJS.ProcessEnv;
     cleanup: () => void;
@@ -195,6 +200,7 @@ function buildRepoMap(specs: FakeRepoSpec[], reposRoot: string): MultreeConfig["
                 : (spec.branchBase ?? defaultBranch),
             hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
             exposes: spec.exposes,
+            variables: spec.variables,
             consumes: spec.consumes,
             defaults: spec.defaults,
             push: spec.push,
@@ -345,6 +351,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
     const profile = createProfileFixture(r.root, r.home, "default", opts);
     return {
         root: r.root,
+        home: r.home,
         traceLog: r.traceLog,
         env: r.env,
         cleanup: r.cleanup,

@@ -21,6 +21,24 @@ export interface ConsumeSpec {
     upsert: Record<string, string>;
 }
 
+// A repo-scoped variable that multree generates and allocates a value for when
+// the repo joins a group. Allocated values are exposed automatically to the
+// wiring context as `{<repo>.<name>}` (no `exposes` declaration needed), so
+// any repo in the group — including the owner — can consume them.
+//
+// For now the only generation pattern is a number drawn from an inclusive
+// [min, max] range. Allocation guarantees the value is not already in use by
+// any other variable in any group across any profile (the ledger lives in
+// $MULTREE_HOME/variables.json so the check spans profiles).
+export interface NumberVariableSpec {
+    // Optional; defaults to "number" (the only supported pattern today).
+    type?: "number";
+    min: number;
+    max: number;
+}
+
+export type VariableSpec = NumberVariableSpec;
+
 export type PrimeStrategy = "copy" | "reflink";
 
 export interface PrimeArtifactSpec {
@@ -56,6 +74,9 @@ export interface RepoConfig {
         timeout?: string | number;
     };
     exposes?: Record<string, ExposeSpec>;
+    // Variables multree generates and allocates for this repo on join. Exposed
+    // automatically as `{<repo>.<name>}`, alongside any `exposes`/`defaults`.
+    variables?: Record<string, VariableSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     prime_artifacts?: PrimeArtifactSpec[];
@@ -118,6 +139,11 @@ export interface MemberState {
     // field; consumers fall back to GroupState.branch when it's absent.
     branch?: string;
     exposes: Record<string, string>;
+    // Values allocated for this member's declared `variables`. Persisted so
+    // they stay stable across rewire/resume and so they can be released from
+    // the global ledger on remove/destroy. Stored as strings to match the
+    // wiring context (exposes/defaults are strings too).
+    variables?: Record<string, string>;
     // Per-phase completion record. Populated as phases complete during
     // `create`. Used by `--resume` to skip phases that already succeeded.
     phase_status?: Partial<Record<PhaseName, PhaseStatus>>;
