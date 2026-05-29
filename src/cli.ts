@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { addCommand } from "./commands/add.ts";
+import { completeCommand, completionCommand } from "./commands/completion.ts";
 import { createCommand } from "./commands/create.ts";
 import { destroyCommand } from "./commands/destroy.ts";
 import { listCommand } from "./commands/list.ts";
@@ -14,30 +15,16 @@ import { shellCommand } from "./commands/shell.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { updateCommand } from "./commands/update.ts";
+import { SUBCOMMANDS } from "./completion.ts";
 import { loadConfig, setProfileFromFlag } from "./config.ts";
 import { toolCommand } from "./tools.ts";
 import type { UpdateStrategy } from "./types.ts";
 import { kickBackgroundCheck, notifyIfNewer, runUpdateCheck } from "./update-check.ts";
 
-const BUILTIN_COMMANDS = new Set([
-    "create",
-    "add",
-    "remove",
-    "list",
-    "show",
-    "rewire",
-    "destroy",
-    "update",
-    "status",
-    "push",
-    "profile",
-    "shell",
-    "help",
-    "--help",
-    "-h",
-    "--version",
-    "-v",
-]);
+// Derived from the canonical SUBCOMMANDS list (the completion source of truth)
+// plus the flag-style aliases the switch below also accepts. Anything not here
+// falls through to manifest tool dispatch.
+const BUILTIN_COMMANDS = new Set<string>([...SUBCOMMANDS, "--help", "-h", "--version", "-v"]);
 
 // Global flags consumed before subcommand dispatch. Stripped from argv and
 // stashed in module-level state in config.ts so command modules don't need to
@@ -134,6 +121,7 @@ Usage:
   multree destroy <name>
   multree profile [list|path|alias|unalias]
   multree shell <name> [<repo>]
+  multree completion <bash|zsh>
 ${toolsLine}
 Manifest: <$MULTREE_HOME or ~/.multree>/<profile>.yaml. Profile resolution:
   --profile <name>  >  $MULTREE_PROFILE  >  "default"  (then aliases.json, one hop).
@@ -192,6 +180,16 @@ function collectFromOverrides(
 
 async function main(): Promise<void> {
     try {
+        // Hidden shell-completion subcommand. Handled before parseArgs (which
+        // would collapse `--flag value` pairs and lose token order that the
+        // completer needs) and before the notify/kick flow so every TAB stays
+        // silent and fast.
+        const rawArgv = process.argv.slice(2);
+        if (rawArgv[0] === "__complete") {
+            completeCommand(rawArgv.slice(1));
+            return;
+        }
+
         const { cmd, positional, flags } = parseArgs();
 
         // Hidden subcommand used by the detached background process. Never emits
@@ -286,6 +284,9 @@ async function main(): Promise<void> {
                 break;
             case "profile":
                 profileCommand(positional);
+                break;
+            case "completion":
+                completionCommand(positional);
                 break;
             case "shell": {
                 const name = requireGroup(positional, "shell");

@@ -47,6 +47,7 @@ src/
   wiring.ts         # read exposes from each member, template + write consumes blocks
   variables.ts      # generate + allocate per-repo variables (e.g. ports); home-level uniqueness ledger
   tools.ts          # generic tool dispatch (e.g. `multree claude <group>`, `multree code <group>`)
+  completion.ts     # pure shell-completion logic (computeCandidates) + bash/zsh scripts + canonical SUBCOMMANDS list
   commands/
     create.ts       # create group: worktree + prime + install + setup, then wire
     add.ts          # add a repo to an existing group, then re-wire the whole group
@@ -56,6 +57,7 @@ src/
     show.ts         # print a single group's state
     rewire.ts       # re-read exposes, re-apply consumes (no worktree changes)
     profile.ts      # manage <$MULTREE_HOME>/ profiles: list, path, alias, unalias
+    completion.ts   # `multree completion <bash|zsh>` script emit + hidden `__complete` candidate generator
 tests/
   unit/             # env block parsing, wiring template substitution
   integration/      # full command flows against fixture repos
