@@ -31,9 +31,14 @@ describe("completion: script emission", () => {
         // `mapfile`/`readarray` are bash 4.0+; macOS still ships bash 3.2, where
         // they fail at runtime (and `bash -n` won't catch it — the syntax is
         // valid). Keep the wrapper to the portable COMPREPLY=( $(...) ) idiom.
-        const r = runMultree(sb, ["completion", "bash"]);
-        assert.doesNotMatch(r.stdout, /\b(mapfile|readarray)\b/);
-        assert.match(r.stdout, /COMPREPLY=\(/);
+        // Strip comment lines first so the prose explaining this doesn't itself
+        // trip the check.
+        const code = runMultree(sb, ["completion", "bash"]).stdout
+            .split("\n")
+            .filter(line => !/^\s*#/.test(line))
+            .join("\n");
+        assert.doesNotMatch(code, /\b(mapfile|readarray)\b/);
+        assert.match(code, /COMPREPLY=\(/);
     });
 
     it("prints a zsh script with the completion function and compdef", () => {
