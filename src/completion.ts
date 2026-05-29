@@ -280,9 +280,16 @@ _multree_complete() {
     # latter is bash 4.0+, but macOS still ships the system bash 3.2. Group/repo
     # names are restricted to [A-Za-z0-9._-] so unquoted word-splitting here is
     # safe (no glob/space surprises).
-    local cur args IFS=$'\\n'
+    #
+    # IFS is scoped to the command substitution ONLY, not the whole function:
+    # bash 3.2 has a bug where a quoted array slice "\${arr[@]:off:len}" collapses
+    # to a single space-joined word when IFS contains no space. Building \`args\`
+    # under the default IFS keeps the slice word boundaries intact; the
+    # newline IFS is then needed only to split the candidate list.
+    local cur args
     cur="\${COMP_WORDS[COMP_CWORD]}"
     args=("\${COMP_WORDS[@]:1:COMP_CWORD-1}" "\$cur")
+    local IFS=$'\\n'
     COMPREPLY=($("\${COMP_WORDS[0]}" __complete "\${args[@]}" 2>/dev/null))
 }
 complete -F _multree_complete multree
