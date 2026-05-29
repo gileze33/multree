@@ -18,6 +18,7 @@ import type {
     PhaseName,
     RepoConfig,
 } from "../types.ts";
+import { assignGroupVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
@@ -42,7 +43,7 @@ interface MemberPlan {
 }
 
 export async function createCommand(args: CreateArgs): Promise<void> {
-    const { config } = loadConfig();
+    const { config, home, profile } = loadConfig();
 
     const existingGroup = loadGroup(config, args.name);
     if (existingGroup && !args.resume) {
@@ -129,6 +130,7 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     await runPhase(config, group, plans, "setup", jobs, args.verbose ?? false);
 
     console.log("");
+    assignGroupVariables(home, profile, config, group);
     wireGroup(config, group);
     saveGroup(config, group);
 
@@ -137,6 +139,9 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     for (const [repoName, member] of Object.entries(group.members)) {
         const tag = member.branch && member.branch !== defaultBranch ? ` (${member.branch})` : "";
         console.log(`  ${repoName}: ${member.path}${tag}`);
+        for (const [k, v] of Object.entries(member.variables ?? {})) {
+            console.log(`    variable ${k}=${v}`);
+        }
         for (const [k, v] of Object.entries(member.exposes)) {
             console.log(`    exposed ${k}=${v}`);
         }

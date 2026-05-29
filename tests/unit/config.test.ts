@@ -253,6 +253,59 @@ describe("loadConfig", () => {
         assert.throws(() => loadConfig(), /depends_on cycle/);
     });
 
+    it("rejects a variable with an unsupported type", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        type: uuid\n        min: 1\n        max: 2\n",
+        );
+        assert.throws(() => loadConfig(), /unsupported type "uuid"/);
+    });
+
+    it("rejects a variable whose min exceeds its max", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 5000\n        max: 4000\n",
+        );
+        assert.throws(() => loadConfig(), /min \(5000\) must be <= max \(4000\)/);
+    });
+
+    it("rejects a variable with a non-integer bound", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000.5\n        max: 5000\n",
+        );
+        assert.throws(() => loadConfig(), /min and max must be integers/);
+    });
+
+    it("rejects a variable with a non-integer default", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000\n        max: 5000\n        default: 4000.5\n",
+        );
+        assert.throws(() => loadConfig(), /default must be an integer/);
+    });
+
+    it("accepts a variable default outside the allocatable range", () => {
+        // A default can legitimately be a well-known shared port outside the
+        // ephemeral [min, max] allocation window.
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000\n        max: 5000\n        default: 80\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.web.variables?.port.default, 80);
+    });
+
+    it("accepts a valid number variable (type defaults to number)", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    variables:\n      port:\n        min: 4000\n        max: 5000\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.web.variables?.port.min, 4000);
+        assert.equal(config.repos.web.variables?.port.max, 5000);
+    });
+
     it("accepts a valid depends_on graph", () => {
         writeFileSync(
             join(home, "default.yaml"),

@@ -2,9 +2,10 @@ import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { deleteGroupDir, loadGroup } from "../state.ts";
+import { releaseGroupVariables } from "../variables.ts";
 
 export async function destroyCommand(name: string): Promise<void> {
-    const { config } = loadConfig();
+    const { config, home, profile } = loadConfig();
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);
@@ -35,6 +36,8 @@ export async function destroyCommand(name: string): Promise<void> {
     }
 
     deleteGroupDir(config, name);
+    // Free every value the group held so the numbers return to the pool.
+    releaseGroupVariables(home, profile, name);
     console.log(`\n✓ Group "${name}" destroyed`);
     console.log(`  (branch "${group.branch}" left in place; delete manually if no longer needed)`);
 }

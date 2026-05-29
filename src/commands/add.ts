@@ -6,6 +6,7 @@ import { addWorktree, fetchRepo } from "../git.ts";
 import { runMemberPhase } from "../phases.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import type { PhaseName } from "../types.ts";
+import { assignGroupVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
 interface AddOptions {
@@ -19,7 +20,7 @@ export async function addCommand(
     repoName: string,
     opts: AddOptions = {},
 ): Promise<void> {
-    const { config } = loadConfig();
+    const { config, home, profile } = loadConfig();
     const group = loadGroup(config, groupName);
     if (!group) {
         throw new Error(`Group not found: ${groupName}`);
@@ -75,6 +76,7 @@ export async function addCommand(
     // affect existing members' consumes, and the new repo's consumes need
     // to be applied against the current context.
     console.log("");
+    assignGroupVariables(home, profile, config, group);
     wireGroup(config, group);
 
     saveGroup(config, group);
