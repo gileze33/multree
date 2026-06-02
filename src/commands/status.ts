@@ -10,7 +10,7 @@ import {
 } from "../git.ts";
 import { loadGroup } from "../state.ts";
 import type { ConsumeSpec, MultreeConfig } from "../types.ts";
-import { buildContext, resolveTemplate } from "../wiring.ts";
+import { buildContext, buildMetaContext, resolveTemplate } from "../wiring.ts";
 
 interface StatusArgs {
     name: string;
@@ -29,6 +29,7 @@ export function statusCommand(args: StatusArgs): void {
     console.log(`Created: ${group.created_at}`);
 
     const ctx = buildContext(config, group);
+    const meta = buildMetaContext(group);
 
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
@@ -74,7 +75,7 @@ export function statusCommand(args: StatusArgs): void {
             }
         }
 
-        const consumes = describeConsumes(config, repoCfg.consumes, ctx);
+        const consumes = describeConsumes(config, repoCfg.consumes, ctx, meta);
         if (consumes.length > 0) {
             console.log(`    consumes:`);
             for (const line of consumes) {
@@ -88,6 +89,7 @@ function describeConsumes(
     _config: MultreeConfig,
     consumes: ConsumeSpec | ConsumeSpec[] | undefined,
     ctx: Record<string, Record<string, string>>,
+    meta: Record<string, string>,
 ): string[] {
     if (!consumes) {
         return [];
@@ -99,7 +101,7 @@ function describeConsumes(
         for (const [key, tmpl] of Object.entries(spec.upsert)) {
             let resolved: string;
             try {
-                resolved = resolveTemplate(tmpl, ctx);
+                resolved = resolveTemplate(tmpl, ctx, meta);
             } catch (err) {
                 resolved = `<unresolved: ${err instanceof Error ? err.message : err}>`;
             }

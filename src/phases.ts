@@ -10,6 +10,7 @@ import { readExposes } from "./wiring.ts";
 
 export interface MemberContext {
     repoName: string;
+    groupName: string;
     repoCfg: RepoConfig;
     repoPath: string;
     worktreePath: string;
@@ -22,7 +23,7 @@ export async function runMemberPhase(
     phase: PhaseName,
     opts: { verbose?: boolean } = {},
 ): Promise<void> {
-    const { repoName, repoCfg, repoPath, worktreePath } = ctx;
+    const { repoName, groupName, repoCfg, repoPath, worktreePath } = ctx;
     if (phase === "prime") {
         if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
             console.log(`[${repoName}] priming artifacts`);
@@ -37,6 +38,7 @@ export async function runMemberPhase(
     await runMemberHook({
         phase,
         repoName,
+        groupName,
         hook,
         repoPath,
         worktreePath,

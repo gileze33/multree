@@ -23,6 +23,7 @@ export async function destroyCommand(name: string): Promise<void> {
             await runMemberHook({
                 phase: "teardown",
                 repoName,
+                groupName: name,
                 hook: teardownHook,
                 repoPath: expandPath(repoCfg.path),
                 worktreePath: member.path,

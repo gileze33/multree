@@ -24,6 +24,7 @@ export async function removeCommand(groupName: string, repoName: string): Promis
         await runMemberHook({
             phase: "teardown",
             repoName,
+            groupName,
             hook: teardownHook,
             repoPath: expandPath(repoCfg.path),
             worktreePath: member.path,

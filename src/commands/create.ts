@@ -42,8 +42,31 @@ interface MemberPlan {
     releasePlan?: MainCheckoutReleasePlan;
 }
 
+const GROUP_NAME_MAX_LENGTH = 40;
+const GROUP_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+
+function validateGroupName(name: string): void {
+    if (name.length === 0) {
+        throw new Error("Group name cannot be empty");
+    }
+    if (name.length > GROUP_NAME_MAX_LENGTH) {
+        throw new Error(
+            `Group name "${name}" is ${name.length} characters; max is ${GROUP_NAME_MAX_LENGTH}. ` +
+                `Group names are exported to hooks as MULTREE_NAME and embedded in resource ` +
+                `identifiers downstream, so keep them short.`,
+        );
+    }
+    if (!GROUP_NAME_RE.test(name)) {
+        throw new Error(
+            `Invalid group name "${name}" (alphanumerics, dot, underscore, hyphen only)`,
+        );
+    }
+}
+
 export async function createCommand(args: CreateArgs): Promise<void> {
     const { config, home, profile } = loadConfig();
+
+    validateGroupName(args.name);
 
     const existingGroup = loadGroup(config, args.name);
     if (existingGroup && !args.resume) {
@@ -193,7 +216,7 @@ async function runPhase(
             return;
         }
         try {
-            await runMemberPhase(config, plan, member, phase, { verbose });
+            await runMemberPhase(config, { ...plan, groupName: group.name }, member, phase, { verbose });
             recordPhase(group, repoName, phase, "done");
         } catch (err) {
             recordPhase(group, repoName, phase, "failed");

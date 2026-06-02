@@ -18,6 +18,11 @@ export interface HookRunOptions {
     timeoutMs?: number;
     verbose?: boolean;
     label?: string; // tag prefixed onto captured/buffered output
+    // Extra env vars layered on top of process.env when the hook spawns. Used
+    // by runMemberHook to surface the group name (MULTREE_NAME) so setup /
+    // teardown scripts can derive their own worktree-scoped identifiers from
+    // it instead of inventing one.
+    extraEnv?: Record<string, string>;
 }
 
 export interface HookRunResult {
@@ -59,7 +64,7 @@ export function runHook(
     return new Promise((resolve, reject) => {
         const child = spawn(command, {
             cwd,
-            env: process.env,
+            env: opts.extraEnv ? { ...process.env, ...opts.extraEnv } : process.env,
             shell: "bash",
             stdio: ["ignore", "pipe", "pipe"],
         });
@@ -141,6 +146,10 @@ export function runHook(
 export interface MemberHookArgs {
     phase: MemberHookPhase;
     repoName: string;
+    // Group the hook is running for; surfaced to the spawned process as
+    // MULTREE_NAME so setup / teardown scripts can derive their own
+    // worktree-scoped identifiers from it.
+    groupName: string;
     hook: HookCmd;
     repoPath: string;
     worktreePath: string;
@@ -159,7 +168,7 @@ export interface MemberHookArgs {
 //   - teardown:      catches HookFailureError/HookTimeoutError and logs, so
 //     `remove`/`destroy` can finish tearing the worktree down regardless.
 export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult | undefined> {
-    const { phase, repoName, hook, repoPath, worktreePath, repoCfg, config } = args;
+    const { phase, repoName, groupName, hook, repoPath, worktreePath, repoCfg, config } = args;
     const cwd = hook.cwd === "repo" ? repoPath : worktreePath;
     const timeoutMs = resolveHookTimeout(hook, repoCfg, config);
     const fatal = phase !== "teardown";
@@ -175,6 +184,7 @@ export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult
             timeoutMs,
             verbose,
             label: verbose ? repoName : undefined,
+            extraEnv: { MULTREE_NAME: groupName },
         });
         console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
         return r;

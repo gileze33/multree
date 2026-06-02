@@ -67,7 +67,7 @@ export async function addCommand(
     group.members[repoName] = member;
     saveGroup(config, group);
 
-    const ctx = { repoName, repoCfg, repoPath, worktreePath };
+    const ctx = { repoName, groupName, repoCfg, repoPath, worktreePath };
     for (const phase of PHASES) {
         await runMemberPhase(config, ctx, member, phase, { verbose: opts.verbose });
     }
