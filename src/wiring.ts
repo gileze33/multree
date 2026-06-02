@@ -24,6 +24,16 @@ export function readExposes(
     return out;
 }
 
+// Top-level template names that don't belong to a specific repo. Resolved by
+// resolveTemplate alongside the usual {repo.key} form (e.g. {multree_name}
+// expands to the group's name). Kept separate from the per-repo context so a
+// repo can't accidentally shadow them by exposing a key with the same name.
+export function buildMetaContext(group: GroupState): Record<string, string> {
+    return {
+        multree_name: group.name,
+    };
+}
+
 export function buildContext(
     cfg: MultreeConfig,
     group: GroupState,
@@ -64,9 +74,21 @@ export function buildContext(
 export function resolveTemplate(
     template: string,
     context: Record<string, Record<string, string>>,
+    meta: Record<string, string> = {},
 ): string {
-    return template.replace(/\{([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\}/g, (full, repo, key) => {
-        const values = context[repo];
+    // The optional second group captures the `.key` half of `{repo.key}`; when
+    // it's absent we treat the whole match as a top-level name (e.g.
+    // `{multree_name}`) and look it up in `meta`.
+    return template.replace(/\{([a-zA-Z0-9_-]+)(?:\.([a-zA-Z0-9_-]+))?\}/g, (full, head, key) => {
+        if (key === undefined) {
+            if (!(head in meta)) {
+                throw new Error(
+                    `Template variable "${full}" could not be resolved (no such top-level name).`,
+                );
+            }
+            return meta[head];
+        }
+        const values = context[head];
         if (!values || !(key in values)) {
             throw new Error(
                 `Template variable "${full}" could not be resolved (no exposed value or default).`,
@@ -94,13 +116,14 @@ export function applyConsumes(
     consumes: ConsumeSpec | undefined,
     marker: string,
     context: Record<string, Record<string, string>>,
+    meta: Record<string, string> = {},
 ): void {
     if (!consumes) {
         return;
     }
     const resolved: Record<string, string> = {};
     for (const [k, tmpl] of Object.entries(consumes.upsert)) {
-        const raw = resolveTemplate(tmpl, context);
+        const raw = resolveTemplate(tmpl, context, meta);
         const { sanitized, stripped } = sanitizeResolvedValue(raw);
         if (stripped) {
             console.warn(
@@ -141,6 +164,7 @@ export function wireGroup(config: MultreeConfig, group: GroupState): void {
     }
 
     const ctx = buildContext(config, group);
+    const meta = buildMetaContext(group);
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
         if (!repoCfg?.consumes) {
@@ -149,7 +173,7 @@ export function wireGroup(config: MultreeConfig, group: GroupState): void {
         const specs = Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes];
         console.log(`[${repoName}] wiring env`);
         for (const spec of specs) {
-            applyConsumes(member.path, spec, group.name, ctx);
+            applyConsumes(member.path, spec, group.name, ctx, meta);
         }
     }
 }
