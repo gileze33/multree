@@ -29,6 +29,8 @@ function ctx(overrides: Partial<CompletionContext> = {}): CompletionContext {
             { name: "beta", members: ["api"] },
         ],
         profiles: ["default", "staging"],
+        actions: [],
+        actionTargets: {},
         ...overrides,
     };
 }
@@ -98,6 +100,43 @@ describe("computeCandidates: repo / member positionals", () => {
         assert.deepEqual(computeCandidates(ctx(), ["add", "beta", ""]), ["frontend"]);
         // alpha has both -> nothing left.
         assert.deepEqual(computeCandidates(ctx(), ["add", "alpha", ""]), []);
+    });
+});
+
+describe("computeCandidates: repo-command action verbs", () => {
+    const withActions = ctx({
+        actions: ["build", "run"],
+        actionTargets: { build: ["team"], run: ["members", "team"] },
+    });
+
+    it("offers action verbs at the subcommand position", () => {
+        const out = computeCandidates(withActions, [""]);
+        assert.ok(out.includes("run"));
+        assert.ok(out.includes("build"));
+    });
+
+    it("filters action verbs by prefix", () => {
+        assert.deepEqual(computeCandidates(withActions, ["bui"]), ["build"]);
+    });
+
+    it("completes a group as the action's first positional", () => {
+        assert.deepEqual(computeCandidates(withActions, ["run", ""]), ["alpha", "beta"]);
+    });
+
+    it("completes the action's targets as the second positional", () => {
+        assert.deepEqual(computeCandidates(withActions, ["run", "alpha", ""]), ["members", "team"]);
+    });
+
+    it("scopes targets to the specific action verb", () => {
+        assert.deepEqual(computeCandidates(withActions, ["build", "alpha", ""]), ["team"]);
+    });
+
+    it("filters targets by prefix", () => {
+        assert.deepEqual(computeCandidates(withActions, ["run", "alpha", "te"]), ["team"]);
+    });
+
+    it("offers nothing past the target positional", () => {
+        assert.deepEqual(computeCandidates(withActions, ["run", "alpha", "team", ""]), []);
     });
 });
 
@@ -239,6 +278,8 @@ describe("computeCandidates: empty context (no manifest)", () => {
         repos: [],
         groups: [],
         profiles: [],
+        actions: [],
+        actionTargets: {},
     };
 
     it("still offers builtin subcommands", () => {

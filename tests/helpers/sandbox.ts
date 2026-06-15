@@ -18,6 +18,7 @@ import type {
     MainCheckoutAction,
     MultreeConfig,
     PrimeArtifactSpec,
+    TargetSpec,
     ToolConfig,
     VariableSpec,
 } from "../../src/types.ts";
@@ -33,6 +34,7 @@ export interface FakeRepoSpec {
     variables?: Record<string, VariableSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
+    commands?: Record<string, TargetSpec>;
     // Extra branches to create in the source repo before any worktree work.
     // Each branch is forked from the repo's default branch and gets an extra
     // commit so it's distinguishable in ahead/behind output.
@@ -203,6 +205,7 @@ function buildRepoMap(specs: FakeRepoSpec[], reposRoot: string): MultreeConfig["
             variables: spec.variables,
             consumes: spec.consumes,
             defaults: spec.defaults,
+            commands: spec.commands,
             push: spec.push,
             update_strategy: spec.updateStrategy,
             main_checkout_action: spec.mainCheckoutAction,

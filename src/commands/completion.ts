@@ -1,3 +1,4 @@
+import { collectActionVerbs } from "../actions.ts";
 import { loadAliases, loadConfig, resolveMultreeHome, setProfileFromFlag } from "../config.ts";
 import {
     BASH_COMPLETION,
@@ -45,6 +46,8 @@ function gatherContext(): CompletionContext {
     let tools: string[] = [];
     let repos: string[] = [];
     let groups: CompletionContext["groups"] = [];
+    let actions: string[] = [];
+    let actionTargets: Record<string, string[]> = {};
     try {
         const { config } = loadConfig();
         tools = Object.keys(config.tools ?? {}).sort();
@@ -52,10 +55,41 @@ function gatherContext(): CompletionContext {
         groups = listGroups(config)
             .map(g => ({ name: g.name, members: Object.keys(g.members).sort() }))
             .sort((a, b) => a.name.localeCompare(b.name));
+        actions = [...collectActionVerbs(config)].sort();
+        actionTargets = buildActionTargets(config);
     } catch {
         // No usable manifest — built-ins below are still completable.
     }
-    return { commands: [...SUBCOMMANDS], tools, repos, groups, profiles: gatherProfiles() };
+    return {
+        commands: [...SUBCOMMANDS],
+        tools,
+        repos,
+        groups,
+        profiles: gatherProfiles(),
+        actions,
+        actionTargets,
+    };
+}
+
+// action verb -> sorted, de-duplicated target names that declare it, across all
+// repos. Manifest-level (not group-scoped) — enough to complete the target slot.
+function buildActionTargets(config: Parameters<typeof collectActionVerbs>[0]): Record<string, string[]> {
+    const byAction: Record<string, Set<string>> = {};
+    for (const repo of Object.values(config.repos ?? {})) {
+        for (const [target, spec] of Object.entries(repo.commands ?? {})) {
+            for (const action of Object.keys(spec)) {
+                if (action === "cwd") {
+                    continue;
+                }
+                (byAction[action] ??= new Set()).add(target);
+            }
+        }
+    }
+    const out: Record<string, string[]> = {};
+    for (const [action, targets] of Object.entries(byAction)) {
+        out[action] = [...targets].sort();
+    }
+    return out;
 }
 
 // Hidden `multree __complete <words...>` — the brain the wrapper scripts call on

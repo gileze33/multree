@@ -86,6 +86,9 @@ export interface RepoConfig {
     variables?: Record<string, VariableSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
+    // Repo-scoped runnable commands. Each key is a target (e.g. a monorepo
+    // package); each target maps action verbs to commands. See TargetSpec.
+    commands?: Record<string, TargetSpec>;
     prime_artifacts?: PrimeArtifactSpec[];
     // Strategy used by `multree update`. Falls back to manifest-level
     // `update_strategy`, then to "rebase".
@@ -109,6 +112,25 @@ export interface ToolConfig {
     // Where to launch the tool. A chain of preferences -- first non-null wins.
     // Items: "$root" -> group dir, otherwise a repo key (e.g. "api").
     open_in?: string | string[];
+}
+
+// A single repo-scoped command. Mirrors ToolConfig.command (shell string or
+// argv array) but lives under an action key inside a target. The object form
+// adds a per-action `cwd` that overrides the target's `cwd`. `{cwd}` is
+// substituted into the command, as for tools.
+export type ActionSpec =
+    | string
+    | string[]
+    | { command: string | string[]; cwd?: string };
+
+// A runnable target inside a repo, e.g. a package in a monorepo. The reserved
+// `cwd` key is the default subdirectory (relative to the worktree) every action
+// runs in; any other key is an action verb whose value is the command to run.
+// Dispatched as `multree <action> <group> <target>`. The shape mirrors `hooks`,
+// which likewise mixes a reserved key (`timeout`) with named entries.
+export interface TargetSpec {
+    cwd?: string;
+    [action: string]: ActionSpec | undefined;
 }
 
 export interface MultreeConfig {

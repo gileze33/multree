@@ -138,6 +138,22 @@ repos:
     #     path: ~/dev/repo-c
     #     hooks:
     #         install: "yarn install"
+    #     # Repo-scoped runnable commands. Each key under `commands` is a TARGET
+    #     # (e.g. a package in a monorepo); each key under a target is an ACTION
+    #     # verb, dispatched as `multree <action> <group> <target>`. Verbs are
+    #     # implicit -- whatever you name them -- so adding `build`/`test`/etc.
+    #     # costs only a manifest key, never code. A target name must be unique
+    #     # across all repos in a group (it's addressed flat). An action's value
+    #     # is a shell string, an argv array, or { command, cwd } to override the
+    #     # target's cwd. `{cwd}` is substituted, as for tools.
+    #     commands:
+    #         app-one:
+    #             cwd: packages/app-one    # subdir relative to the worktree; omit to run at the repo root
+    #             run: yarn dev            # multree run <group> app-one
+    #             build: yarn build        # multree build <group> app-one
+    #         app-two:
+    #             cwd: packages/app-two
+    #             run: yarn dev
     #     consumes:
     #         - file: packages/app-one/.env
     #           upsert:

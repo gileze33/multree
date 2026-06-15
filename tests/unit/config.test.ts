@@ -316,4 +316,55 @@ describe("loadConfig", () => {
         const { config } = loadConfig();
         assert.deepEqual(config.repos.frontend.depends_on, ["api"]);
     });
+
+    it("rejects a command action that shadows a builtin subcommand", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        list: yarn dev\n",
+        );
+        assert.throws(() => loadConfig(), /shadows the built-in subcommand "list"/);
+    });
+
+    it("rejects a command action that collides with a tool name", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\ntools:\n  open:\n    command: code\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        open: yarn dev\n",
+        );
+        assert.throws(() => loadConfig(), /collides with the tool "open"/);
+    });
+
+    it("rejects an absolute command cwd", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        cwd: /abs/path\n        run: yarn dev\n",
+        );
+        assert.throws(() => loadConfig(), /cwd must be a relative path/);
+    });
+
+    it("rejects a command target with no actions", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        cwd: packages/app\n",
+        );
+        assert.throws(() => loadConfig(), /defines no actions/);
+    });
+
+    it("rejects an empty command string", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        run: ""\n',
+        );
+        assert.throws(() => loadConfig(), /command must not be empty/);
+    });
+
+    it("accepts a valid commands block", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  web:\n    path: /tmp/web\n    commands:\n      app:\n        cwd: packages/app\n        run: yarn dev\n        build: yarn build\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.web.commands?.app.cwd, "packages/app");
+        assert.equal(config.repos.web.commands?.app.run, "yarn dev");
+        assert.equal(config.repos.web.commands?.app.build, "yarn build");
+    });
 });
