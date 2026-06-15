@@ -20,6 +20,11 @@ export interface CompletionContext {
     groups: CompletionGroup[];
     // Profile names (yaml files + alias names) under MULTREE_HOME.
     profiles: string[];
+    // Action verbs from repo `commands` blocks — completable at the first
+    // position like tools (`multree <action> <group> <target>`).
+    actions: string[];
+    // Per-action target names, used to complete the third positional.
+    actionTargets: Record<string, string[]>;
 }
 
 // Canonical built-in subcommands. Single source of truth for both the completer
@@ -196,6 +201,7 @@ function completeProfilePositional(
 function completePositional(
     subcommand: string,
     isTool: boolean,
+    isAction: boolean,
     positionals: string[],
     cur: string,
     ctx: CompletionContext,
@@ -205,6 +211,18 @@ function completePositional(
     }
     if (subcommand === "completion") {
         return positionals.length === 0 ? filterByPrefix(["bash", "zsh"], cur) : [];
+    }
+    if (isAction) {
+        // `multree <action> <group> <target>`: group first, then a target that
+        // declares this action.
+        const idx = positionals.length;
+        if (idx === 0) {
+            return filterByPrefix(groupNames(ctx), cur);
+        }
+        if (idx === 1) {
+            return filterByPrefix(ctx.actionTargets[subcommand] ?? [], cur);
+        }
+        return [];
     }
     if (isTool || GROUP_FIRST.has(subcommand)) {
         const idx = positionals.length;
@@ -249,10 +267,11 @@ export function computeCandidates(ctx: CompletionContext, rawWords: string[]): s
         if (cur.startsWith("-")) {
             return filterByPrefix(["--help", "--version", "--profile"], cur);
         }
-        return filterByPrefix([...new Set([...ctx.commands, ...ctx.tools])], cur);
+        return filterByPrefix([...new Set([...ctx.commands, ...ctx.tools, ...ctx.actions])], cur);
     }
 
     const isTool = ctx.tools.includes(subcommand);
+    const isAction = !isTool && ctx.actions.includes(subcommand);
 
     // Value completion for the preceding value-taking flag.
     if (prev !== undefined && prev.startsWith("--")) {
@@ -267,7 +286,14 @@ export function computeCandidates(ctx: CompletionContext, rawWords: string[]): s
         return filterByPrefix(flagNames(subcommand), cur);
     }
 
-    return completePositional(subcommand, isTool, collectPositionals(subcommand, rest), cur, ctx);
+    return completePositional(
+        subcommand,
+        isTool,
+        isAction,
+        collectPositionals(subcommand, rest),
+        cur,
+        ctx,
+    );
 }
 
 // Wrapper scripts. Both pass the words up to and including the (possibly empty)

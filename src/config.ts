@@ -1,9 +1,11 @@
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join, resolve } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { parse } from "yaml";
+import { SUBCOMMANDS } from "./completion.ts";
 import { detectCycle } from "./scheduler.ts";
 import type {
+    ActionSpec,
     MainCheckoutAction,
     MultreeConfig,
     RepoConfig,
@@ -172,8 +174,71 @@ function validate(cfg: MultreeConfig): void {
             throw new Error(`Repo "${name}" is missing required field: path`);
         }
         validateVariables(name, repo);
+        validateCommands(name, repo, cfg);
     }
     validateDependsOn(cfg);
+}
+
+// Target and action names share the wiring/group-name character class so they
+// stay safe on the CLI and in completion.
+const COMMAND_NAME_RE = /^[A-Za-z0-9._-]+$/;
+const RESERVED_TARGET_KEY = "cwd";
+
+function validateCommands(repoName: string, repo: RepoConfig, cfg: MultreeConfig): void {
+    if (!repo.commands) {
+        return;
+    }
+    const builtins = new Set<string>(SUBCOMMANDS);
+    const toolNames = new Set(Object.keys(cfg.tools ?? {}));
+    for (const [target, spec] of Object.entries(repo.commands)) {
+        const where = `Repo "${repoName}" command target "${target}"`;
+        if (!COMMAND_NAME_RE.test(target)) {
+            throw new Error(`${where}: invalid name (alphanumerics, dot, underscore, hyphen only)`);
+        }
+        if (spec.cwd !== undefined && (typeof spec.cwd !== "string" || isAbsolute(spec.cwd))) {
+            throw new Error(`${where}: cwd must be a relative path`);
+        }
+        const actions = Object.keys(spec).filter(key => key !== RESERVED_TARGET_KEY);
+        if (actions.length === 0) {
+            throw new Error(`${where}: defines no actions`);
+        }
+        for (const action of actions) {
+            const aWhere = `${where} action "${action}"`;
+            if (!COMMAND_NAME_RE.test(action)) {
+                throw new Error(
+                    `${aWhere}: invalid name (alphanumerics, dot, underscore, hyphen only)`,
+                );
+            }
+            // An action verb that shadows a builtin or a tool would never
+            // dispatch (builtins and tools win), so reject it at load time
+            // rather than leave a silent dead command in the manifest.
+            if (builtins.has(action)) {
+                throw new Error(`${aWhere}: shadows the built-in subcommand "${action}"; rename it`);
+            }
+            if (toolNames.has(action)) {
+                throw new Error(`${aWhere}: collides with the tool "${action}"; rename it`);
+            }
+            validateActionCommand(aWhere, spec[action]);
+        }
+    }
+}
+
+function validateActionCommand(where: string, value: ActionSpec | undefined): void {
+    const command =
+        typeof value === "string" || Array.isArray(value) ? value : value?.command;
+    if (typeof command === "string") {
+        if (command.trim() === "") {
+            throw new Error(`${where}: command must not be empty`);
+        }
+        return;
+    }
+    if (Array.isArray(command)) {
+        if (command.length === 0 || command.some(item => typeof item !== "string")) {
+            throw new Error(`${where}: command argv must be a non-empty array of strings`);
+        }
+        return;
+    }
+    throw new Error(`${where}: command must be a string, an argv array, or { command, cwd }`);
 }
 
 // Variable names share the character class that wiring templates accept for the

@@ -2,6 +2,7 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { actionCommand, collectActionVerbs } from "./actions.ts";
 import { addCommand } from "./commands/add.ts";
 import { completeCommand, completionCommand } from "./commands/completion.ts";
 import { createCommand } from "./commands/create.ts";
@@ -98,6 +99,10 @@ function help(): void {
         const tools = Object.keys(config.tools ?? {});
         if (tools.length > 0) {
             toolsLine = `\nTools (from manifest):\n  multree <${tools.join("|")}> <name>\n`;
+        }
+        const actions = [...collectActionVerbs(config)].sort();
+        if (actions.length > 0) {
+            toolsLine += `\nRepo commands (from manifest):\n  multree <${actions.join("|")}> <name> <target>\n`;
         }
     } catch {
         // ignore missing/broken config in help
@@ -303,13 +308,24 @@ async function main(): Promise<void> {
                 console.log(version);
                 break;
             default: {
-                // Fall through to tool dispatch.
+                // Unknown verb: a manifest tool, a repo-command action, or an
+                // error. Builtins are handled above; reaching here means cmd is
+                // not one.
                 if (BUILTIN_COMMANDS.has(cmd)) {
                     console.error(`Unknown command: ${cmd}\n`);
                     help();
                     process.exit(1);
                 }
-                toolCommand(cmd, requireGroup(positional, cmd));
+                const { config } = loadConfig();
+                if (config.tools?.[cmd]) {
+                    toolCommand(cmd, requireGroup(positional, cmd));
+                } else if (collectActionVerbs(config).has(cmd)) {
+                    actionCommand(cmd, requireGroup(positional, cmd), positional[1]);
+                } else {
+                    console.error(`Unknown command: ${cmd}\n`);
+                    help();
+                    process.exit(1);
+                }
             }
         }
     } catch (err) {
