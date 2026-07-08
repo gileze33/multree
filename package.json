@@ -52,9 +52,6 @@
         "template": "keepachangelog",
         "unreleased": true
     },
-    "dependencies": {
-        "yaml": "^2.6.0"
-    },
     "devDependencies": {
         "@types/node": "^22.10.0",
         "@typescript-eslint/parser": "^8.55.0",
@@ -62,7 +59,8 @@
         "eslint": "^10.3.0",
         "tsdown": "^0.22.0",
         "tsx": "^4.22.0",
-        "typescript": "^6.0.3"
+        "typescript": "^6.0.3",
+        "yaml": "^2.6.0"
     },
     "engines": {
         "node": ">=20.6"
