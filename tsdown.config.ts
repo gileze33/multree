@@ -6,7 +6,7 @@ export default defineConfig({
     target: "node20.6",
     platform: "node",
     outDir: "dist",
-    noExternal: ["yaml"],
+    deps: { alwaysBundle: ["yaml"] },
     clean: true,
     shims: true,
     dts: false,
