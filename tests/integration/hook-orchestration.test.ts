@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
-import { createSandbox, trace, type Sandbox } from "../helpers/sandbox.ts";
+import { createSandbox, trace, traceSpan, type Sandbox } from "../helpers/sandbox.ts";
 
 // --plan: a dry run that prints the schedule without touching disk.
 describe("create --plan", () => {
@@ -33,33 +33,72 @@ describe("create --plan", () => {
     });
 });
 
-// --jobs + parallel_setup: two slow setup hooks should overlap.
+// --jobs + parallel_setup: two slow setup hooks should overlap. Overlap is
+// asserted from trace ordering, not wall-clock — each hook brackets its sleep
+// with start/end markers, and parallelism means both starts land before either
+// end. This is immune to machine load, unlike a total-elapsed-time budget.
 describe("create --jobs with parallel_setup", () => {
     let sb: Sandbox;
     beforeEach(() => {
         sb = createSandbox({
             parallelSetup: true,
             repos: [
-                { key: "a", dirname: "fake-a", setup: trace("a:setup", "sleep 0.4") },
-                { key: "b", dirname: "fake-b", setup: trace("b:setup", "sleep 0.4") },
+                { key: "a", dirname: "fake-a", setup: traceSpan("a") },
+                { key: "b", dirname: "fake-b", setup: traceSpan("b") },
             ],
         });
     });
     afterEach(() => sb.cleanup());
 
-    it("overlapping setups complete in roughly one slot, not two", () => {
-        const start = Date.now();
+    it("overlapping setups are both in-flight at once, not serialized", () => {
         const r = runMultree(sb, ["create", "g", "--include", "a,b", "--jobs", "2"]);
-        const elapsed = Date.now() - start;
         assert.equal(r.status, 0, r.stderr);
-        // Each setup sleeps 0.4s; serial would be 0.8s+overhead. With jobs=2
-        // and parallel_setup, total spawn-to-exit should be well under 0.7s
-        // wall-clock for the setup phase alone. Allow generous slack for the
-        // surrounding fetch+worktree work and CI variance.
-        assert.ok(elapsed < 3000, `expected <3000ms total, got ${elapsed}ms`);
         const events = sb.trace();
-        assert.ok(events.includes("a:setup"));
-        assert.ok(events.includes("b:setup"));
+        const idx = (e: string) => events.indexOf(e);
+        for (const e of ["a:start", "a:end", "b:start", "b:end"]) {
+            assert.ok(idx(e) >= 0, `missing event ${e}, got: ${events.join(",")}`);
+        }
+        // Intervals overlap iff the later start precedes the earlier end, i.e.
+        // there is a moment when both hooks have started and neither has ended.
+        const lastStart = Math.max(idx("a:start"), idx("b:start"));
+        const firstEnd = Math.min(idx("a:end"), idx("b:end"));
+        assert.ok(
+            lastStart < firstEnd,
+            `expected setups to overlap, got order: ${events.join(",")}`,
+        );
+    });
+});
+
+// The mirror of the above: with parallel_setup off (and one job) the same two
+// hooks must run strictly serially — proving the overlap assertion has teeth.
+describe("create without parallel_setup", () => {
+    let sb: Sandbox;
+    beforeEach(() => {
+        sb = createSandbox({
+            parallelSetup: false,
+            repos: [
+                { key: "a", dirname: "fake-a", setup: traceSpan("a") },
+                { key: "b", dirname: "fake-b", setup: traceSpan("b") },
+            ],
+        });
+    });
+    afterEach(() => sb.cleanup());
+
+    it("setups run serially: one finishes before the next starts", () => {
+        const r = runMultree(sb, ["create", "g", "--include", "a,b", "--jobs", "1"]);
+        assert.equal(r.status, 0, r.stderr);
+        const events = sb.trace();
+        const idx = (e: string) => events.indexOf(e);
+        for (const e of ["a:start", "a:end", "b:start", "b:end"]) {
+            assert.ok(idx(e) >= 0, `missing event ${e}, got: ${events.join(",")}`);
+        }
+        // Whichever setup runs first, its end must precede the other's start.
+        const lastStart = Math.max(idx("a:start"), idx("b:start"));
+        const firstEnd = Math.min(idx("a:end"), idx("b:end"));
+        assert.ok(
+            lastStart > firstEnd,
+            `expected serial setups, got order: ${events.join(",")}`,
+        );
     });
 });
 
@@ -106,7 +145,7 @@ describe("create with hook timeout", () => {
                     key: "slow",
                     dirname: "fake-slow",
                     hookTimeout: "200ms",
-                    setup: "sleep 5",
+                    setup: "sleep 30",
                 },
             ],
         });
@@ -118,8 +157,11 @@ describe("create with hook timeout", () => {
         const r = runMultree(sb, ["create", "g", "--include", "slow"]);
         const elapsed = Date.now() - start;
         assert.notEqual(r.status, 0);
-        // Should fail fast: total time well under the 5s sleep.
-        assert.ok(elapsed < 4000, `expected <4000ms (killed early), got ${elapsed}ms`);
+        // The hook sleeps 30s but is capped at 200ms, so a working kill returns
+        // in seconds. The 15s ceiling sits well above any plausible loaded
+        // fetch+worktree overhead yet far below the 30s a non-killed hook would
+        // take — load can't close that gap, but a broken kill still fails.
+        assert.ok(elapsed < 15000, `expected <15000ms (killed early), got ${elapsed}ms`);
         const combined = `${r.stdout}\n${r.stderr}`;
         assert.match(combined, /timed out/i);
     });

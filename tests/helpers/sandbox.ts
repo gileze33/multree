@@ -407,6 +407,16 @@ export function trace(label: string, then?: string): string {
     return then ? `${append} && ${then}` : append;
 }
 
+// Brackets `inner` (a slow command, default a short sleep) with "<label>:start"
+// and "<label>:end" markers. Lets a test prove two hooks overlapped in time
+// purely from trace ordering — no wall-clock assertion, so it stays
+// deterministic under arbitrary machine load.
+export function traceSpan(label: string, inner = "sleep 0.4"): string {
+    const start = `echo "${label}:start" >> "$${TRACE_VAR}"`;
+    const end = `echo "${label}:end" >> "$${TRACE_VAR}"`;
+    return `${start} && ${inner} && ${end}`;
+}
+
 // Same but exits non-zero after tracing — for simulating setup failures.
 export function traceThenFail(label: string, then?: string): string {
     const append = `echo "${label}" >> "$${TRACE_VAR}"`;
