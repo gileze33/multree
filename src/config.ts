@@ -177,6 +177,7 @@ function validate(cfg: MultreeConfig): void {
         validateCommands(name, repo, cfg);
     }
     validateDependsOn(cfg);
+    validateDefaultInclude(cfg);
 }
 
 // Target and action names share the wiring/group-name character class so they
@@ -293,6 +294,34 @@ function validateDependsOn(cfg: MultreeConfig): void {
     const cycle = detectCycle(known, depsOf);
     if (cycle) {
         throw new Error(`depends_on cycle: ${cycle.join(" -> ")}`);
+    }
+}
+
+// Repo keys `create` falls back to when `--include` is omitted. Validated here
+// rather than inside `create` so a typo fails on every command, the same way an
+// unknown `--include` key fails before any worktree work happens.
+function validateDefaultInclude(cfg: MultreeConfig): void {
+    if (cfg.default_include === undefined) {
+        return;
+    }
+    if (!Array.isArray(cfg.default_include) || cfg.default_include.length === 0) {
+        throw new Error("default_include must be a non-empty list of repo keys");
+    }
+    const seen = new Set<string>();
+    for (const repo of cfg.default_include) {
+        if (typeof repo !== "string" || repo.trim() === "") {
+            throw new Error("default_include entries must be non-empty repo keys");
+        }
+        if (!cfg.repos[repo]) {
+            throw new Error(
+                `default_include lists unknown repo "${repo}". ` +
+                    `Available: ${Object.keys(cfg.repos).join(", ")}`,
+            );
+        }
+        if (seen.has(repo)) {
+            throw new Error(`default_include lists "${repo}" more than once`);
+        }
+        seen.add(repo);
     }
 }
 

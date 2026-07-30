@@ -113,8 +113,8 @@ function help(): void {
 Usage:
   multree [--profile <name>] <command> [...]
 
-  multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
-                                                  [--jobs <N>] [--plan] [--resume] [--verbose]
+  multree create <name> [--include <repo,repo,...>] [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
+                                                    [--jobs <N>] [--plan] [--resume] [--verbose]
   multree add <name> <repo> [--verbose]
   multree remove <name> <repo>
   multree list
@@ -160,9 +160,12 @@ function parseStrategy(raw: string | true | undefined): UpdateStrategy | undefin
     return raw;
 }
 
+// Collects every `--from-<repo> <branch>` pair. Keys are not checked against the
+// selected repos here: the selection may come from the manifest's
+// `default_include`, which isn't known until create.ts has loaded the config —
+// so create.ts owns that validation.
 function collectFromOverrides(
     flags: Record<string, string | true>,
-    includeKeys: string[],
 ): Record<string, string> {
     const overrides: Record<string, string> = {};
     for (const [k, v] of Object.entries(flags)) {
@@ -172,11 +175,6 @@ function collectFromOverrides(
         const repoKey = k.slice("from-".length);
         if (typeof v !== "string") {
             throw new Error(`--${k} requires a branch value`);
-        }
-        if (!includeKeys.includes(repoKey)) {
-            // Surface the error later (create.ts validates against include),
-            // but only collect overrides whose key is plausible to avoid
-            // shadowing global flags like --from-this-other-thing.
         }
         overrides[repoKey] = v;
     }
@@ -211,16 +209,21 @@ async function main(): Promise<void> {
         switch (cmd) {
             case "create": {
                 const name = requireGroup(positional, "create");
-                if (typeof flags.include !== "string") {
-                    throw new Error("create requires --include <repo,...>");
+                // A bare `--include` (no value) is a typo, not a request for the
+                // manifest default — never fall back on it silently.
+                if (flags.include === true) {
+                    throw new Error("--include requires a repo list (e.g. --include api,frontend)");
                 }
-                const include = flags.include.split(",").map(s => s.trim()).filter(Boolean);
-                if (include.length === 0) {
+                // undefined = flag absent; create.ts falls back to default_include.
+                const include = typeof flags.include === "string"
+                    ? flags.include.split(",").map(s => s.trim()).filter(Boolean)
+                    : undefined;
+                if (include !== undefined && include.length === 0) {
                     throw new Error("--include must list at least one repo");
                 }
                 const branch = typeof flags.branch === "string" ? flags.branch : undefined;
                 const from = typeof flags.from === "string" ? flags.from : undefined;
-                const branchesByRepo = collectFromOverrides(flags, include);
+                const branchesByRepo = collectFromOverrides(flags);
                 const jobs = typeof flags.jobs === "string" ? parseJobs(flags.jobs) : undefined;
                 await createCommand({
                     name,

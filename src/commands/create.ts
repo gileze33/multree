@@ -23,7 +23,9 @@ import { wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
     name: string;
-    include: string[];
+    // Absent when the user gave no `--include`; falls back to the manifest's
+    // `default_include`.
+    include?: string[];
     branch?: string;
     from?: string;
     branchesByRepo?: Record<string, string>;
@@ -31,6 +33,12 @@ interface CreateArgs {
     plan?: boolean;
     resume?: boolean;
     verbose?: boolean;
+}
+
+// CreateArgs after the repo selection has been resolved, so downstream helpers
+// never have to care where the list came from.
+interface ResolvedCreateArgs extends CreateArgs {
+    include: string[];
 }
 
 interface MemberPlan {
@@ -63,8 +71,28 @@ function validateGroupName(name: string): void {
     }
 }
 
+// Same shape as resolveJobCount: CLI flag first, then the manifest-level
+// default. Unlike jobs there is no built-in fallback — there is no universally
+// sensible repo set — so an absent pair is an error naming both routes.
+function resolveInclude(
+    fromCli: string[] | undefined,
+    config: MultreeConfig,
+    manifestPath: string,
+): string[] {
+    if (fromCli && fromCli.length > 0) {
+        return fromCli;
+    }
+    if (config.default_include && config.default_include.length > 0) {
+        console.log(`Using default_include: ${config.default_include.join(", ")}`);
+        return [...config.default_include];
+    }
+    throw new Error(
+        `create requires --include <repo,...>, or set default_include in ${manifestPath}`,
+    );
+}
+
 export async function createCommand(args: CreateArgs): Promise<void> {
-    const { config, home, profile } = loadConfig();
+    const { config, home, profile, path: manifestPath } = loadConfig();
 
     validateGroupName(args.name);
 
@@ -79,7 +107,12 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         throw new Error(`--resume: no existing group named "${args.name}" to resume`);
     }
 
-    for (const repo of args.include) {
+    // Resolved once, here, so every downstream reader (including preflight) sees
+    // one list regardless of where it came from.
+    const include = resolveInclude(args.include, config, manifestPath);
+    const resolved: ResolvedCreateArgs = { ...args, include };
+
+    for (const repo of include) {
         if (!config.repos[repo]) {
             throw new Error(
                 `Unknown repo "${repo}". Available: ${Object.keys(config.repos).join(", ")}`,
@@ -87,9 +120,10 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         }
     }
     for (const repo of Object.keys(args.branchesByRepo ?? {})) {
-        if (!args.include.includes(repo)) {
+        if (!include.includes(repo)) {
             throw new Error(
-                `--from-${repo} given but "${repo}" is not in --include`,
+                `--from-${repo} given but "${repo}" is not in the selected repos: ` +
+                    include.join(", "),
             );
         }
     }
@@ -103,7 +137,7 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         throw new Error(`Group directory already exists: ${dir}`);
     }
 
-    const plans = preflight(config, args, defaultBranch, dir, existingGroup);
+    const plans = preflight(config, resolved, defaultBranch, dir, existingGroup);
     const jobs = resolveJobCount(args.jobs, config.jobs);
 
     // --plan: print the plan and exit before any side effects.
@@ -330,7 +364,7 @@ function printPlan(
 // item is invalid; the main loop is only entered after every member passes.
 function preflight(
     config: MultreeConfig,
-    args: CreateArgs,
+    args: ResolvedCreateArgs,
     defaultBranch: string,
     dir: string,
     existing: GroupState | null,

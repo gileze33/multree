@@ -94,6 +94,7 @@ Keep multiple discrete manifests — one per employer, project, or experiment �
 - `jobs` (top-level) — default concurrency cap for `create`'s prime/install phases (and `setup` when `parallel_setup` is set). Overridden by `--jobs N` on the CLI; defaults to the host's CPU count.
 - `parallel_setup` (top-level) — run the `setup` phase in parallel up to `jobs`, respecting `depends_on`. Defaults to `false` (setup runs serially because it often touches shared resources).
 - `hook_timeout` (top-level) — default timeout for any hook in any repo, overridden by per-repo `hooks.timeout` and per-hook `timeout`.
+- `default_include` (top-level) — list of repo keys `create` uses when `--include` is omitted, for the common case where most groups span the same repos. An explicit `--include` always wins. Unknown keys fail at config load (so a typo breaks every command, rather than surfacing halfway through a `create`), as do empty lists and duplicates.
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
 
@@ -147,8 +148,8 @@ multree destroy feature-x
 ## Commands
 
 ```
-multree create <name> --include <repo,repo,...> [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
-                                                [--jobs <N>] [--plan] [--resume] [--verbose]
+multree create <name> [--include <repo,repo,...>] [--branch <branch>] [--from <branch>] [--from-<repo> <branch> ...]
+                                                  [--jobs <N>] [--plan] [--resume] [--verbose]
 multree add <name> <repo> [--verbose]
 multree remove <name> <repo>
 multree list
@@ -165,7 +166,7 @@ multree --version
 multree --help
 ```
 
-`create` makes a worktree per included repo, runs each `install` and `setup` hook, reads `exposes`, then upserts each `consumes` block. `--branch` names the new feature branch (defaults to `multree/<name>`). `--from <branch>` instead bases every member's worktree on an existing local or remote branch — useful for opening a colleague's PR locally as a group. `--from-<repo> <branch>` overrides the branch for a specific member (when branch names differ across repos).
+`create` makes a worktree per included repo, runs each `install` and `setup` hook, reads `exposes`, then upserts each `consumes` block. `--include` may be omitted if the manifest sets `default_include`, in which case that list is used and announced on stdout. `--branch` names the new feature branch (defaults to `multree/<name>`). `--from <branch>` instead bases every member's worktree on an existing local or remote branch — useful for opening a colleague's PR locally as a group. `--from-<repo> <branch>` overrides the branch for a specific member (when branch names differ across repos).
 
 Hooks run phase-by-phase across all members: `prime_artifacts` → `install` → `setup`. The first two phases are parallelised up to `--jobs N` (default = CPU count); `setup` runs serially by default but can be parallelised via the manifest's `parallel_setup`. Inter-repo dependencies declared with `depends_on` force a member's `setup` to wait for its prerequisites' `setup` to complete. Per-phase progress is persisted to `.multree.json`; if a hook fails, re-run with `--resume` to pick up from the failed phase. `--plan` prints the schedule without executing. `--verbose` streams each hook's stdout/stderr live (prefixed with the repo key); the default captures output and only surfaces it on failure.
 

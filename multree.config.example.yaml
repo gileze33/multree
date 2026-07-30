@@ -13,7 +13,7 @@
 # Then aliases.json (one hop) gives the resolved profile name. Manage with
 # `multree profile list|path|alias|unalias`.
 #
-# Once your manifest is in place: `multree create <group> --include <repo,...>`.
+# Once your manifest is in place: `multree create <group> [--include <repo,...>]`.
 
 version: 1
 
@@ -45,6 +45,11 @@ worktree_root: ~/dev/worktree
 # and individual hook objects' `timeout`. Accepts "5m", "30s", "500ms", or a
 # bare number (seconds). No timeout if unset.
 # hook_timeout: 10m
+
+# Repos `create` uses when you don't pass `--include`, for the common case where
+# most groups span the same set. An explicit `--include` always wins. Unknown
+# keys (and empty or duplicated lists) fail at config load.
+# default_include: [api, frontend]
 
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen
