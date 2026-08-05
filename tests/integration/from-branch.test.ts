@@ -86,7 +86,30 @@ describe("create --from", () => {
             "frontend-other",
         ]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /not in --include/);
+        assert.match(r.stderr, /"frontend" is not in the selected repos: api/);
+    });
+
+    // The selection can come from the manifest rather than the flag, so the
+    // same check has to fire when `--include` was never typed.
+    it("rejects --from-<repo> when repo is not in default_include", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api", branches: ["feature-x"] },
+                { key: "frontend", dirname: "fake-frontend", branches: ["feature-x"] },
+            ],
+            defaultInclude: ["api"],
+        });
+        const r = runMultree(sb, [
+            "create",
+            "g",
+            "--from",
+            "feature-x",
+            "--from-frontend",
+            "feature-x",
+        ]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /"frontend" is not in the selected repos: api/);
     });
 
     it("errors when --from branch does not exist (and creates no worktrees)", () => {

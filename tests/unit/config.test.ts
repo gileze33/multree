@@ -367,4 +367,37 @@ describe("loadConfig", () => {
         assert.equal(config.repos.web.commands?.app.run, "yarn dev");
         assert.equal(config.repos.web.commands?.app.build, "yarn build");
     });
+
+    // default_include is validated at load — not inside `create` — so a typo
+    // surfaces on any command instead of halfway through building a group.
+    const TWO_REPOS = "version: 1\nrepos:\n  api:\n    path: /tmp/api\n  frontend:\n    path: /tmp/frontend\n";
+
+    it("rejects an unknown repo in default_include", () => {
+        writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, ghost]\n`);
+        assert.throws(
+            () => loadConfig(),
+            /default_include lists unknown repo "ghost"\. Available: api, frontend/,
+        );
+    });
+
+    it("rejects an empty default_include", () => {
+        writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: []\n`);
+        assert.throws(() => loadConfig(), /default_include must be a non-empty list/);
+    });
+
+    it("rejects a duplicated repo in default_include", () => {
+        writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, api]\n`);
+        assert.throws(() => loadConfig(), /default_include lists "api" more than once/);
+    });
+
+    it("rejects a non-string default_include entry", () => {
+        writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, 7]\n`);
+        assert.throws(() => loadConfig(), /default_include entries must be non-empty repo keys/);
+    });
+
+    it("accepts a valid default_include", () => {
+        writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, frontend]\n`);
+        const { config } = loadConfig();
+        assert.deepEqual(config.default_include, ["api", "frontend"]);
+    });
 });

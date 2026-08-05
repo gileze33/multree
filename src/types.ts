@@ -156,6 +156,10 @@ export interface MultreeConfig {
     // Manifest-level default hook timeout. Overridden by RepoConfig.hooks.timeout
     // and individual HookCmd.timeout.
     hook_timeout?: string | number;
+    // Repo keys `create` uses when no `--include` is given. `--include` always
+    // wins. Keys are validated against `repos` at config load, so a typo fails
+    // on every command rather than mid-create.
+    default_include?: string[];
 }
 
 export type PhaseName = "prime" | "install" | "setup";

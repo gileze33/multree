@@ -71,6 +71,10 @@ export interface SandboxOptions {
     parallelSetup?: boolean;
     hookTimeout?: string | number;
     tools?: Record<string, ToolConfig>;
+    // Repo keys `create` falls back to when `--include` is omitted. Written to
+    // the manifest verbatim, so tests can also pass invalid values (unknown
+    // keys, empties, duplicates) to exercise config-load validation.
+    defaultInclude?: string[];
 }
 
 // Rich per-profile handle. Returned by `createMultiProfileSandbox().profile(name)`
@@ -276,6 +280,7 @@ function createProfileFixture(
         jobs: opts.jobs,
         parallel_setup: opts.parallelSetup,
         hook_timeout: opts.hookTimeout,
+        default_include: opts.defaultInclude,
     };
     const manifestPath = join(home, `${name}.yaml`);
     writeFileSync(manifestPath, stringify(config));

@@ -79,6 +79,77 @@ describe("create + destroy (happy path)", () => {
     });
 });
 
+// `default_include` is the manifest-level repo selection `create` falls back to
+// when `--include` is omitted. Covers each variant the knob has: the flag
+// winning, the fallback firing, neither present, and the invalid-manifest cases
+// that must fail at config load rather than mid-create.
+describe("create with default_include", () => {
+    let sb: Sandbox;
+
+    const build = (defaultInclude?: string[]): Sandbox =>
+        createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api", setup: trace("api:setup") },
+                { key: "frontend", dirname: "fake-frontend", setup: trace("frontend:setup") },
+            ],
+            defaultInclude,
+        });
+
+    beforeEach(() => {
+        sb = build(["api", "frontend"]);
+    });
+
+    afterEach(() => sb.cleanup());
+
+    it("falls back to default_include when --include is omitted", () => {
+        const r = runMultree(sb, ["create", "demo"]);
+        assert.equal(r.status, 0, `non-zero exit\n${r.stderr}`);
+        assert.match(r.stdout, /Using default_include: api, frontend/);
+
+        const state = sb.state("demo");
+        assert.deepEqual(Object.keys(state!.members), ["api", "frontend"]);
+    });
+
+    it("prefers an explicit --include over default_include", () => {
+        const r = runMultree(sb, ["create", "demo", "--include", "api"]);
+        assert.equal(r.status, 0, `non-zero exit\n${r.stderr}`);
+        assert.doesNotMatch(r.stdout, /Using default_include/);
+
+        const state = sb.state("demo");
+        assert.deepEqual(Object.keys(state!.members), ["api"]);
+    });
+
+    it("errors naming both routes when neither --include nor default_include is set", () => {
+        sb.cleanup();
+        sb = build(undefined);
+
+        const r = runMultree(sb, ["create", "demo"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /create requires --include <repo,\.\.\.>/);
+        assert.match(r.stderr, /set default_include in .*default\.yaml/);
+        assert.equal(existsSync(join(sb.worktreeRoot, "demo")), false);
+    });
+
+    // A bare `--include` is a typo, not a request for the manifest default.
+    it("rejects a valueless --include instead of falling back", () => {
+        const r = runMultree(sb, ["create", "demo", "--include"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /--include requires a repo list/);
+        assert.equal(existsSync(join(sb.worktreeRoot, "demo")), false);
+    });
+
+    // Validation lives in config.ts, so a bad default_include has to break every
+    // command — not just surface halfway through a create.
+    it("rejects an unknown repo in default_include at config load", () => {
+        sb.cleanup();
+        sb = build(["api", "phantom"]);
+
+        const r = runMultree(sb, ["list"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /default_include lists unknown repo "phantom"/);
+    });
+});
+
 // End-to-end coverage that the prime phase actually copies the source repo's
 // working-tree artifacts into a new worktree during `multree create`. The
 // unit tests in tests/unit/artifacts.test.ts exercise primeArtifacts directly;
