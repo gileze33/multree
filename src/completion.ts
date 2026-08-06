@@ -210,7 +210,14 @@ function completePositional(
         return completeProfilePositional(positionals, cur, ctx);
     }
     if (subcommand === "completion") {
-        return positionals.length === 0 ? filterByPrefix(["bash", "zsh"], cur) : [];
+        const idx = positionals.length;
+        if (idx === 0) {
+            return filterByPrefix(["bash", "zsh", "install"], cur);
+        }
+        if (idx === 1 && positionals[0] === "install") {
+            return filterByPrefix(["bash", "zsh"], cur);
+        }
+        return [];
     }
     if (isAction) {
         // `multree <action> <group> <target>`: group first, then a target that
@@ -300,7 +307,7 @@ export function computeCandidates(ctx: CompletionContext, rawWords: string[]): s
 // word under the cursor to `multree __complete`, then feed the newline-separated
 // candidates back to the shell. The program is invoked as the user typed it
 // (COMP_WORDS[0] / words[1]) so a non-PATH invocation still self-dispatches.
-export const BASH_COMPLETION = `# multree bash completion — eval "$(multree completion bash)"
+export const BASH_COMPLETION = `# multree bash completion — \`multree completion install bash\` (or eval "$(multree completion bash)")
 _multree_complete() {
     # COMPREPLY=( $(...) ) with IFS=newline rather than mapfile/readarray: the
     # latter is bash 4.0+, but macOS still ships the system bash 3.2. Group/repo
@@ -321,7 +328,7 @@ _multree_complete() {
 complete -F _multree_complete multree
 `;
 
-export const ZSH_COMPLETION = `# multree zsh completion — eval "$(multree completion zsh)"
+export const ZSH_COMPLETION = `# multree zsh completion — \`multree completion install zsh\` (or eval "$(multree completion zsh)")
 _multree_complete() {
     local cur
     cur="\${words[CURRENT]}"

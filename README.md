@@ -162,6 +162,7 @@ multree destroy <name>
 multree profile [list|path|alias|unalias]
 multree shell <name> [<repo>]
 multree completion <bash|zsh>
+multree completion install <bash|zsh>
 multree --version
 multree --help
 ```
@@ -190,15 +191,15 @@ Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.
 
 ## Shell completion
 
-`multree completion <bash|zsh>` prints a completion script for the named shell. Wire it into your shell profile:
+Set it up once with:
 
 ```bash
-# ~/.bashrc
-eval "$(multree completion bash)"
-
-# ~/.zshrc  (after `autoload -Uz compinit && compinit`)
-eval "$(multree completion zsh)"
+multree completion install bash   # or: zsh
 ```
+
+This writes the wrapper script to `$XDG_DATA_HOME/multree/completion.<shell>` (default `~/.local/share/multree/`) and appends a guarded `source` line to your `~/.bashrc` / `~/.zshrc` (honouring `$ZDOTDIR`). Re-running it is a no-op once wired. Zsh needs `compinit` loaded before the source line runs — oh-my-zsh and most setups already do this.
+
+`multree completion <bash|zsh>` prints the same script for manual wiring. Avoid the tempting `eval "$(multree completion zsh)"` in your shell profile though: the script is static (all dynamic work happens at TAB-time), so the eval pays a full Node.js boot on **every new shell** just to print an unchanging stub — typically 100–200ms of added startup latency.
 
 Completion is **dynamic** — it reads your manifest and group state on every TAB, so it offers live values, not a hardcoded list:
 
@@ -207,7 +208,7 @@ Completion is **dynamic** — it reads your manifest and group state on every TA
 - repo keys for `create --include` (comma-aware: `--include api,<TAB>` completes the remaining repos), and a group's own members for `shell`/`remove`/`push --include`;
 - `--strategy rebase|merge`, the `profile` actions, profile names for `--profile` and `profile alias|unalias|path`.
 
-The scripts shell out to a hidden `multree __complete` subcommand that does the work — so completion automatically tracks new subcommands and manifest tools with no script to regenerate. A `--profile <name>` already on the line is honoured, so completion resolves groups against the profile you're targeting. A missing or broken manifest degrades gracefully to completing just the built-in subcommands.
+The scripts shell out to a hidden `multree __complete` subcommand that does the work — so completion automatically tracks new subcommands and manifest tools with no script to regenerate, even across multree upgrades. A `--profile <name>` already on the line is honoured, so completion resolves groups against the profile you're targeting. A missing or broken manifest degrades gracefully to completing just the built-in subcommands.
 
 ## Update notifications
 
