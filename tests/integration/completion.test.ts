@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -56,6 +57,66 @@ describe("completion: script emission", () => {
 
     it("errors for an unknown shell", () => {
         const r = runMultree(sb, ["completion", "fish"]);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /bash \| zsh/);
+    });
+});
+
+describe("completion: install", () => {
+    let sb: Sandbox;
+    let fakeHome: string;
+    let env: NodeJS.ProcessEnv;
+    beforeEach(() => {
+        sb = createSandbox({ repos: [{ key: "api" }] });
+        fakeHome = join(sb.root, "fake-home");
+        mkdirSync(fakeHome, { recursive: true });
+        // Redirect every path install touches into the sandbox.
+        env = {
+            ...sb.env,
+            HOME: fakeHome,
+            ZDOTDIR: fakeHome,
+            XDG_DATA_HOME: join(fakeHome, ".local", "share"),
+        };
+    });
+    afterEach(() => sb.cleanup());
+
+    it("writes the zsh script under XDG_DATA_HOME and wires ZDOTDIR's .zshrc to source it", () => {
+        const r = runMultree({ env }, ["completion", "install", "zsh"]);
+        assert.equal(r.status, 0, r.stderr);
+        const scriptPath = join(fakeHome, ".local", "share", "multree", "completion.zsh");
+        assert.match(readFileSync(scriptPath, "utf-8"), /compdef _multree_complete multree/);
+        const rc = readFileSync(join(fakeHome, ".zshrc"), "utf-8");
+        assert.ok(rc.includes(scriptPath), "rc should source the installed script");
+    });
+
+    it("is idempotent — re-running install adds no duplicate source line", () => {
+        runMultree({ env }, ["completion", "install", "zsh"]);
+        const r = runMultree({ env }, ["completion", "install", "zsh"]);
+        assert.equal(r.status, 0, r.stderr);
+        const rc = readFileSync(join(fakeHome, ".zshrc"), "utf-8");
+        const sourcingLines = rc.split("\n").filter(l => l.includes("completion.zsh"));
+        assert.equal(sourcingLines.length, 1);
+    });
+
+    it("writes the bash script and wires ~/.bashrc", () => {
+        const r = runMultree({ env }, ["completion", "install", "bash"]);
+        assert.equal(r.status, 0, r.stderr);
+        const scriptPath = join(fakeHome, ".local", "share", "multree", "completion.bash");
+        assert.match(readFileSync(scriptPath, "utf-8"), /complete -F _multree_complete multree/);
+        const rc = readFileSync(join(fakeHome, ".bashrc"), "utf-8");
+        assert.ok(rc.includes(scriptPath), "rc should source the installed script");
+    });
+
+    it("appends to an existing rc without clobbering it", () => {
+        writeFileSync(join(fakeHome, ".zshrc"), "# existing config\n");
+        runMultree({ env }, ["completion", "install", "zsh"]);
+        const rc = readFileSync(join(fakeHome, ".zshrc"), "utf-8");
+        assert.ok(rc.startsWith("# existing config"));
+        assert.ok(rc.includes("completion.zsh"));
+    });
+
+    it("errors for a missing or unknown shell", () => {
+        const r = runMultree({ env }, ["completion", "install", "fish"]);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /bash \| zsh/);
     });
