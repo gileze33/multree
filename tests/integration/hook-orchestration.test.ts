@@ -98,6 +98,15 @@ describe("create with depends_on", () => {
 
 // Per-repo hook timeout fails the run with a timeout-shaped error.
 describe("create with hook timeout", () => {
+    // The hook is killed at the 200ms timeout, so the sleep never runs to
+    // completion and its length costs the passing case nothing. The budget's
+    // only job is to sit below the sleep: it has to absorb whatever tsx
+    // startup, config load and fetch cost under full-suite load, so it is not
+    // a measure of kill latency -- tests/unit/hooks.test.ts asserts that
+    // directly, without a CLI in the way.
+    const SETUP_SLEEP_SECONDS = 60;
+    const TOTAL_BUDGET_MS = 30_000;
+
     let sb: Sandbox;
     beforeEach(() => {
         sb = createSandbox({
@@ -106,7 +115,7 @@ describe("create with hook timeout", () => {
                     key: "slow",
                     dirname: "fake-slow",
                     hookTimeout: "200ms",
-                    setup: "sleep 5",
+                    setup: `sleep ${SETUP_SLEEP_SECONDS}`,
                 },
             ],
         });
@@ -118,8 +127,11 @@ describe("create with hook timeout", () => {
         const r = runMultree(sb, ["create", "g", "--include", "slow"]);
         const elapsed = Date.now() - start;
         assert.notEqual(r.status, 0);
-        // Should fail fast: total time well under the 5s sleep.
-        assert.ok(elapsed < 4000, `expected <4000ms (killed early), got ${elapsed}ms`);
+        assert.ok(
+            elapsed < TOTAL_BUDGET_MS,
+            `expected <${TOTAL_BUDGET_MS}ms total, got ${elapsed}ms `
+                + `(hook ran to completion instead of being killed?)`,
+        );
         const combined = `${r.stdout}\n${r.stderr}`;
         assert.match(combined, /timed out/i);
     });
