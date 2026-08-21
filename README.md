@@ -84,9 +84,11 @@ Keep multiple discrete manifests — one per employer, project, or experiment �
 - `repos.<name>.hooks.timeout` — default timeout for this repo's hooks; overridden by per-hook `timeout`.
 - `repos.<name>.depends_on` — list of other repo keys whose `setup` must complete before this repo's `setup` starts. Cycles are rejected at config load.
 - `repos.<name>.exposes.<key>` — read a value from the new worktree's env file after setup. Other repos reference it as `{<repo>.<key>}` in their `consumes.upsert`.
+- `repos.<name>.variables.<key>` — a value multree generates and allocates for this repo when it joins a group, exposed automatically as `{<repo>.<key>}` with no `exposes` entry needed. The only pattern today is `type: number` drawn from an inclusive `[min, max]` range; the chosen value is unique across every group in *every* profile (the ledger lives at `<$MULTREE_HOME>/variables.json`), stays stable across `rewire`, and is reclaimed on `remove`/`destroy`. An exhausted range is a clear error rather than a collision. The optional `default` is what consumers resolve to when this repo is *not* in the group — it need not lie within `[min, max]`, so it can be a well-known shared port; a `defaults.<key>` entry overrides it.
 - `repos.<name>.consumes.upsert` — env keys to write into the new worktree's env file. Values are templated against the exposes context.
 - `repos.<name>.defaults.<key>` — fallback value when the repo isn't part of the group (e.g. point frontends at default dev port `5000` when the api isn't selected).
 - `repos.<name>.prime_artifacts` — APFS-reflink (macOS) or `--reflink=auto` (Linux) large trees like `node_modules` from the main checkout into the worktree so install reconciles instead of cold-installing.
+- `repos.<name>.commands.<target>.<action>` — repo-scoped runnable commands, dispatched as `multree <action> <group> <target>`. Each key under `commands` is a target (typically a package in a monorepo); each key under a target is an action verb you name yourself, so adding `run`/`build`/`test` costs a manifest key and no code. The reserved `cwd` key is the subdirectory every action runs in — omit it to run at the worktree root. An action's value is a shell string, an argv array, or `{ command, cwd }` to override the target's `cwd`; `{cwd}` is substituted, as for tools. Targets are addressed flat, so a target name must be unique across every repo in a group.
 - `repos.<name>.update_strategy` — `rebase` or `merge`; overrides the manifest-level default for `multree update`.
 - `repos.<name>.push` — set `false` to skip this repo in `multree push`. Defaults to `true`.
 - `update_strategy` (top-level) — default strategy used by `multree update` when neither a per-repo override nor `--strategy` is given. Defaults to `rebase`.
@@ -186,7 +188,9 @@ Hooks run phase-by-phase across all members: `prime_artifacts` → `install` →
 
 `shell` opens an interactive shell (`$SHELL`, falling back to `/bin/sh`) in the group folder, or in a specific member's worktree if a repo key is given.
 
-Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.g. `multree code feature-x` opens the group in your editor.
+Any `tools.<name>` block in the manifest becomes `multree <name> <group>` — e.g. `multree code feature-x` opens the group in your editor. A tool acts on the group as a whole and takes no further arguments; `open_in` is the only way to choose which member's directory it runs in, and it is a static preference chain, so it cannot depend on which repos a particular group contains.
+
+Any action verb under a repo's `commands` block becomes `multree <action> <group> <target>` instead — e.g. `multree run feature-x app-one`. Reach for this rather than a tool whenever the command needs to address one member explicitly: only the `commands` form takes a target, and it is correct whether the group has one member or ten. Omit the target and multree lists the ones available.
 
 ## Shell completion
 
