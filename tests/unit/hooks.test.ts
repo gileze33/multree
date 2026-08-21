@@ -91,9 +91,16 @@ describe("runHook", () => {
     });
 
     it("rejects with HookTimeoutError when the hook outlives the timeout", async () => {
+        // Sleep far longer than the timeout so the elapsed time can only be
+        // short if the child was actually killed, and assert on it here rather
+        // than in the integration suite, where CLI startup dominates the
+        // measurement.
+        const start = Date.now();
         await assert.rejects(
-            runHook("sleep 5", cwd, { timeoutMs: 100 }),
+            runHook("sleep 60", cwd, { timeoutMs: 100 }),
             (err: unknown) => err instanceof HookTimeoutError && err.timeoutMs === 100,
         );
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 1500, `expected the kill within 1500ms, took ${elapsed}ms`);
     });
 });
