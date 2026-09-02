@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { realpathSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -95,6 +95,28 @@ describe("repo command dispatch", () => {
     it("propagates a non-zero exit code", () => {
         const r = runMultree(sb, ["run", "g", "boom"]);
         assert.equal(r.status, 42);
+    });
+
+    it("resolves the shell through PATH rather than a hardcoded /bin/bash", () => {
+        // A `bash` earlier on PATH than the real one, logging how it was called.
+        // An absolute interpreter path in the runner bypasses it entirely.
+        //
+        // Matching on the `-c` form is load-bearing: `bin/multree` is itself
+        // `#!/usr/bin/env bash`, so the shim is hit for the launcher whatever the
+        // runner does. Only `runForeground` invokes it as `bash -c <command>`.
+        const shimDir = join(sb.root, "shim-bin");
+        mkdirSync(shimDir, { recursive: true });
+        const log = join(sb.root, "shim-calls.log");
+        const shim = join(shimDir, "bash");
+        writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${log}\nexec /bin/bash "$@"\n`);
+        chmodSync(shim, 0o755);
+
+        const env = { ...sb.env, PATH: `${shimDir}:${sb.env.PATH ?? ""}` };
+        const r = runMultree({ env }, ["run", "g", "north"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const calls = readFileSync(log, "utf-8");
+        assert.match(calls, /^-c .*echo CWD=/m, `shim was never asked to run the command:\n${calls}`);
     });
 
     it("lists repo command verbs in help", () => {

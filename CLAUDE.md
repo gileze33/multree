@@ -47,6 +47,8 @@ src/
   wiring.ts         # read exposes from each member, template + write consumes blocks
   variables.ts      # generate + allocate per-repo variables (e.g. ports); home-level uniqueness ledger
   tools.ts          # generic tool dispatch (e.g. `multree claude <group>`, `multree code <group>`)
+  actions.ts        # repo-scoped `commands` dispatch: resolve <action> <group> <target> to command + cwd
+  exec.ts           # runForeground: the shared runner behind tools and repo commands
   completion.ts     # pure shell-completion logic (computeCandidates) + bash/zsh scripts + canonical SUBCOMMANDS list
   commands/
     create.ts       # create group: worktree + prime + install + setup, then wire
@@ -84,8 +86,10 @@ multree.config.example.yaml  # committed example manifest; user copies it to ~/.
 - multree is a generic, repo-agnostic orchestrator. Keep `src/` and `tests/` free of names, paths, ports, hostnames, or domain language borrowed from any particular project, company, or product. Tests should use neutral fixture names (`api`, `frontend`, `monorepo-client`, `north`/`south` for regions) — never the name of a real-world repo, service, or organisation. Project-specific behaviour belongs in the user's manifest, not the source or the test suite.
 - Strict TS, ES2022, `module: ESNext`, `moduleResolution: Bundler`, `allowImportingTsExtensions: true`. All intra-`src` imports use `.ts` extensions — preserve this.
 - One concern per file. New subcommands go under `src/commands/<name>.ts` and are wired into `BUILTIN_COMMANDS` and the switch in `src/cli.ts`.
-- Side-effecting filesystem / shell logic lives in `git.ts`, `hooks.ts`, `artifacts.ts`, `env.ts`. Keep `commands/*.ts` as orchestrators that call these — don't inline new `execSync` or `fs` calls into commands.
+- Side-effecting filesystem / shell logic lives in `git.ts`, `hooks.ts`, `artifacts.ts`, `env.ts`, `exec.ts`. Keep `commands/*.ts` as orchestrators that call these — don't inline new `execSync` or `fs` calls into commands.
 - Shell out via `execFileSync` + an argv array, never `execSync` with a template string. Branch names, paths, refs and any other user-controlled value MUST flow in as arguments so the shell can't reinterpret them. The helpers in `git.ts` (`gitInherit`, `gitSilent`, `gitCapture`, `gitTry`) are the only sanctioned path.
+- The one exception is `runForeground` in `exec.ts`, which runs a manifest-supplied `tools` / `commands` value. The user authored that string, so shell interpretation is the point rather than a hazard. It stays confined to that function — don't generalise it into a reason to build shell strings elsewhere.
+- Never hardcode an interpreter path. Resolve `bash`, `python3` and friends through PATH, because `/bin/bash` does not exist on NixOS and some BSDs. This regressed once (removed in #29, reintroduced by `exec.ts` in #46), so it is worth checking on any new spawn site.
 - Validation errors throw; `main()` in `cli.ts` prints `err.message` and exits 1. Don't swallow exceptions further down the stack.
 - Path expansion (`~/`) goes through `expandPath` in `config.ts`. Don't hand-roll tilde handling elsewhere.
 - Branch base resolution goes through `resolveBranchBase` — per-repo `branch_base`, falling back to `origin/main`.
