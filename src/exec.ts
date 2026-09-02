@@ -6,7 +6,8 @@ export function substituteCwd(template: string, cwd: string): string {
 
 // Run a command in the foreground with inherited stdio, substituting `{cwd}`,
 // and propagate a non-zero exit code via process.exit so the caller's shell
-// sees it. A shell string runs through /bin/bash; an argv array execs directly.
+// sees it. A shell string runs through `bash` (resolved via PATH, so it works
+// where /bin/bash doesn't exist); an argv array execs directly.
 export function runForeground(command: string | string[], cwd: string): void {
     try {
         if (Array.isArray(command)) {
@@ -16,7 +17,7 @@ export function runForeground(command: string | string[], cwd: string): void {
             const [bin, ...rest] = command.map(a => substituteCwd(a, cwd));
             execFileSync(bin, rest, { cwd, stdio: "inherit" });
         } else {
-            execSync(substituteCwd(command, cwd), { cwd, stdio: "inherit", shell: "/bin/bash" });
+            execSync(substituteCwd(command, cwd), { cwd, stdio: "inherit", shell: "bash" });
         }
     } catch (err) {
         const code = (err as { status?: number }).status;
