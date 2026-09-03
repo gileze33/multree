@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { expandPath, loadConfig, resolveBranchBase } from "../../src/config.ts";
+import {
+    expandPath,
+    loadConfig,
+    resolveBranchBase,
+    resolvePrimeArtifacts,
+} from "../../src/config.ts";
+import type { MultreeConfig, PrimeArtifactSpec, RepoConfig } from "../../src/types.ts";
 
 describe("expandPath", () => {
     // Env var test hygiene: we manipulate process.env in this block, snapshot
@@ -165,6 +171,104 @@ describe("resolveBranchBase", () => {
 
     it("falls back to origin/main when no override is set", () => {
         assert.equal(resolveBranchBase({}), "origin/main");
+    });
+});
+
+// A repo's effective priming list is the manifest-level entries plus its own,
+// with the repo's entry winning for any target both tiers declare.
+describe("resolvePrimeArtifacts", () => {
+    const build = (
+        manifest: PrimeArtifactSpec[] | undefined,
+        repo: PrimeArtifactSpec[] | undefined,
+    ): { cfg: MultreeConfig; repoCfg: RepoConfig } => {
+        const repoCfg: RepoConfig = { path: "/tmp/api", prime_artifacts: repo };
+        return {
+            cfg: { version: 1, repos: { api: repoCfg }, prime_artifacts: manifest },
+            repoCfg,
+        };
+    };
+
+    it("gives a repo that declares nothing every manifest-level entry", () => {
+        const { cfg, repoCfg } = build(
+            [
+                { path: "config.local", strategy: "copy" },
+                { find: "node_modules", strategy: "reflink" },
+            ],
+            undefined,
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "config.local", strategy: "copy" },
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    it("gives a repo with its own entries those plus the manifest-level ones", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "node_modules", strategy: "reflink" }],
+            [{ path: "cache", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "cache", strategy: "copy" },
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    // AE1: the repo's entry is the one applied to a shared target, and the
+    // manifest's entry for it is dropped rather than applied second.
+    it("lets a repo entry replace a manifest entry for the same path", () => {
+        const { cfg, repoCfg } = build(
+            [{ path: "config.local", strategy: "reflink" }],
+            [{ path: "config.local", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "config.local", strategy: "copy" },
+        ]);
+    });
+
+    it("lets a repo entry replace a manifest entry for the same find value", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "node_modules", strategy: "reflink" }],
+            [{ find: "node_modules", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { find: "node_modules", strategy: "copy" },
+        ]);
+    });
+
+    // `path: x` and `find: x` are different targets: one is a literal location,
+    // the other a basename searched for anywhere in the tree.
+    it("treats a path and a find naming the same string as separate targets", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "cache", strategy: "reflink" }],
+            [{ path: "cache", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "cache", strategy: "copy" },
+            { find: "cache", strategy: "reflink" },
+        ]);
+    });
+
+    it("orders a repo's own entries ahead of the inherited ones", () => {
+        const { cfg, repoCfg } = build(
+            [{ path: "shared-a" }, { path: "shared-b" }],
+            [{ path: "own-a" }, { path: "own-b" }],
+        );
+        assert.deepEqual(
+            resolvePrimeArtifacts(cfg, repoCfg).map(spec => spec.path),
+            ["own-a", "own-b", "shared-a", "shared-b"],
+        );
+    });
+
+    it("leaves per-repo behaviour unchanged when the manifest declares none", () => {
+        const { cfg, repoCfg } = build(undefined, [{ find: "node_modules", strategy: "reflink" }]);
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    it("returns an empty list when neither tier declares anything", () => {
+        const { cfg, repoCfg } = build(undefined, undefined);
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), []);
     });
 });
 

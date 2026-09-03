@@ -89,6 +89,11 @@ export interface RepoConfig {
     // Repo-scoped runnable commands. Each key is a target (e.g. a monorepo
     // package); each target maps action verbs to commands. See TargetSpec.
     commands?: Record<string, TargetSpec>;
+    // Artifacts primed into this repo's worktree on join. EXTENDS the
+    // manifest-level `prime_artifacts` rather than replacing it: the effective
+    // list is these entries followed by the manifest's, with a manifest entry
+    // for a target this list already names dropped. Resolve it via
+    // resolvePrimeArtifacts() -- never read this field directly.
     prime_artifacts?: PrimeArtifactSpec[];
     // Strategy used by `multree update`. Falls back to manifest-level
     // `update_strategy`, then to "rebase".
@@ -160,6 +165,12 @@ export interface MultreeConfig {
     // wins. Keys are validated against `repos` at config load, so a typo fails
     // on every command rather than mid-create.
     default_include?: string[];
+    // Artifacts every repo primes into its worktree on join. A repo's own
+    // `prime_artifacts` EXTENDS this list (and wins for any target both tiers
+    // name), so a repo that declares nothing still receives these entries.
+    // Priming is a join-time phase: an entry added here after a group exists
+    // reaches worktrees created from that point on, not the existing ones.
+    prime_artifacts?: PrimeArtifactSpec[];
 }
 
 export type PhaseName = "prime" | "install" | "setup";

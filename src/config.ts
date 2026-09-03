@@ -8,6 +8,7 @@ import type {
     ActionSpec,
     MainCheckoutAction,
     MultreeConfig,
+    PrimeArtifactSpec,
     RepoConfig,
     UpdateStrategy,
 } from "./types.ts";
@@ -385,6 +386,52 @@ export function resolveUpdateStrategy(
 
 export function canPush(repoCfg: RepoConfig): boolean {
     return repoCfg.push !== false;
+}
+
+// Identity of the thing an entry primes. `path: x` and `find: x` are distinct
+// targets — one is a literal location, the other a basename searched for
+// anywhere in the tree — so the addressing field is part of the key. Returns
+// undefined for a structurally invalid entry (neither field, or both), which
+// validatePrimeArtifacts rejects at load; such an entry is never deduped.
+function primeTargetKey(spec: PrimeArtifactSpec): string | undefined {
+    if (spec.path !== undefined && spec.find !== undefined) {
+        return undefined;
+    }
+    if (spec.path !== undefined) {
+        return `path:${spec.path}`;
+    }
+    if (spec.find !== undefined) {
+        return `find:${spec.find}`;
+    }
+    return undefined;
+}
+
+// A repo's effective priming list: its own entries EXTEND the manifest-level
+// ones rather than replacing them. The repo's entries come first and a later
+// entry for a target already claimed is dropped, so a repo overrides an
+// inherited target's strategy just by naming that target — and, for a `path`
+// and a `find` that happen to reach the same directory, its entry gets there
+// first and the destination-occupied guard stops the inherited one.
+//
+// Both read sites (the prime phase and `create --plan`) must go through here;
+// reading RepoConfig.prime_artifacts directly skips the inherited entries.
+export function resolvePrimeArtifacts(
+    cfg: MultreeConfig,
+    repoCfg: RepoConfig,
+): PrimeArtifactSpec[] {
+    const out: PrimeArtifactSpec[] = [];
+    const claimed = new Set<string>();
+    for (const spec of [...(repoCfg.prime_artifacts ?? []), ...(cfg.prime_artifacts ?? [])]) {
+        const key = primeTargetKey(spec);
+        if (key !== undefined) {
+            if (claimed.has(key)) {
+                continue;
+            }
+            claimed.add(key);
+        }
+        out.push(spec);
+    }
+    return out;
 }
 
 export function resolveMainCheckoutAction(

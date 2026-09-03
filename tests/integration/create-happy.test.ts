@@ -218,3 +218,108 @@ describe("create with prime_artifacts", () => {
         assert.equal(readFileSync(primed, "utf-8"), "default-strategy");
     });
 });
+
+// The manifest-level `prime_artifacts` tier: every repo inherits these on top
+// of its own list, so a repo that declares nothing still gets primed. Priming
+// is a join-time phase, so a shared entry added later reaches only worktrees
+// created from that point on.
+describe("create with manifest-level prime_artifacts", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    // AE2.
+    it("primes a repo that declares no prime_artifacts of its own", () => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" /* no primeArtifacts */ }],
+            primeArtifacts: [
+                { path: "shared-one", strategy: "copy" },
+                { find: "shared-two", strategy: "copy" },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        mkdirSync(join(repo, "shared-one"), { recursive: true });
+        writeFileSync(join(repo, "shared-one", "marker"), "one");
+        mkdirSync(join(repo, "packages", "a", "shared-two"), { recursive: true });
+        writeFileSync(join(repo, "packages", "a", "shared-two", "marker"), "two");
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const wt = sb.worktreePath("g", "api");
+        assert.equal(readFileSync(join(wt, "shared-one", "marker"), "utf-8"), "one");
+        assert.equal(
+            readFileSync(join(wt, "packages", "a", "shared-two", "marker"), "utf-8"),
+            "two",
+        );
+    });
+
+    it("applies a repo's own entry to a target the manifest also declares", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    // Same target as the shared entry, so only this one runs.
+                    primeArtifacts: [{ path: "shared-one", strategy: "copy" }],
+                },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+            primeArtifacts: [{ path: "shared-one", strategy: "copy" }],
+        });
+        for (const key of ["api", "frontend"]) {
+            const repo = sb.repoPath(key);
+            mkdirSync(join(repo, "shared-one"), { recursive: true });
+            writeFileSync(join(repo, "shared-one", "marker"), key);
+        }
+
+        const r = runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        assert.equal(
+            readFileSync(join(sb.worktreePath("g", "api"), "shared-one", "marker"), "utf-8"),
+            "api",
+        );
+        assert.equal(
+            readFileSync(join(sb.worktreePath("g", "frontend"), "shared-one", "marker"), "utf-8"),
+            "frontend",
+        );
+    });
+
+    // AE7: priming is a join-time phase, so a shared entry added after a group
+    // exists reaches the next member to join and leaves the existing ones alone.
+    it("applies a later-added shared entry only to worktrees created after it", () => {
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api" },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        for (const key of ["api", "frontend"]) {
+            const repo = sb.repoPath(key);
+            mkdirSync(join(repo, "late-shared"), { recursive: true });
+            writeFileSync(join(repo, "late-shared", "marker"), key);
+        }
+
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api"]).status, 0);
+        const apiWt = sb.worktreePath("g", "api");
+        assert.equal(existsSync(join(apiWt, "late-shared")), false);
+
+        sb.updateManifest(cfg => {
+            cfg.prime_artifacts = [{ path: "late-shared", strategy: "copy" }];
+        });
+
+        const r = runMultree(sb, ["add", "g", "frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        assert.equal(
+            readFileSync(
+                join(sb.worktreePath("g", "frontend"), "late-shared", "marker"),
+                "utf-8",
+            ),
+            "frontend",
+        );
+        // The existing member is untouched: priming does not re-run on it.
+        assert.equal(existsSync(join(apiWt, "late-shared")), false);
+    });
+});
