@@ -323,3 +323,37 @@ describe("create with manifest-level prime_artifacts", () => {
         assert.equal(existsSync(join(apiWt, "late-shared")), false);
     });
 });
+
+
+// R15: a priming-validation failure has to break the commands that would act on
+// it (create, add) without locking the user out of the ones that inspect and
+// tear down a group they already have on disk.
+describe("prime_artifacts validation", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    it("blocks create but still allows show and destroy", () => {
+        sb = createSandbox({ repos: [{ key: "api", dirname: "fake-api" }] });
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api"]).status, 0);
+
+        sb.updateManifest(cfg => {
+            cfg.prime_artifacts = [
+                { path: "cache", strategy: "hardlink" as never },
+            ];
+        });
+
+        const created = runMultree(sb, ["create", "g2", "--include", "api"]);
+        assert.notEqual(created.status, 0);
+        assert.match(created.stderr, /unknown strategy "hardlink"/);
+
+        const shown = runMultree(sb, ["show", "g"]);
+        assert.equal(shown.status, 0, shown.stderr);
+        assert.match(shown.stdout, /Group: g/);
+        assert.match(shown.stderr, /unknown strategy "hardlink"/);
+
+        const destroyed = runMultree(sb, ["destroy", "g"]);
+        assert.equal(destroyed.status, 0, destroyed.stderr);
+        assert.equal(existsSync(join(sb.worktreeRoot, "g")), false);
+    });
+});

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { isAbsolute, join, resolve } from "path";
+import { isAbsolute, join, normalize, resolve } from "path";
 import { parse } from "yaml";
 import { SUBCOMMANDS } from "./completion.ts";
 import { detectCycle } from "./scheduler.ts";
@@ -9,6 +9,7 @@ import type {
     MainCheckoutAction,
     MultreeConfig,
     PrimeArtifactSpec,
+    PrimeStrategy,
     RepoConfig,
     UpdateStrategy,
 } from "./types.ts";
@@ -128,7 +129,15 @@ export interface LoadedConfig {
     home: string;
 }
 
-export function loadConfig(opts: ResolveOptions = {}): LoadedConfig {
+export interface LoadOptions extends ResolveOptions {
+    // Commands that only inspect or tear down a group that already exists never
+    // run the prime phase, so a priming-validation failure must not lock the
+    // user out of the very commands they need to look at and clean up that
+    // group. Those commands pass true; everything else fails at load.
+    tolerateInvalidPrimeArtifacts?: boolean;
+}
+
+export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
     const resolved = resolveManifest(opts);
     // Typo-protection: an explicitly-set $MULTREE_HOME pointing at a missing
     // directory is almost always a typo, not a "you haven't set up multree
@@ -143,7 +152,7 @@ export function loadConfig(opts: ResolveOptions = {}): LoadedConfig {
         throw new Error(buildMissingManifestError(resolved));
     }
     const config = parse(readFileSync(resolved.path, "utf-8")) as MultreeConfig;
-    validate(config);
+    validate(config, opts.tolerateInvalidPrimeArtifacts === true);
     return {
         config,
         path: resolved.path,
@@ -163,7 +172,7 @@ function buildMissingManifestError(resolved: ResolvedManifest): string {
     );
 }
 
-function validate(cfg: MultreeConfig): void {
+function validate(cfg: MultreeConfig, tolerateInvalidPrimeArtifacts: boolean): void {
     if (cfg.version !== 1) {
         throw new Error(`Unsupported config version: ${cfg.version} (expected 1)`);
     }
@@ -179,6 +188,137 @@ function validate(cfg: MultreeConfig): void {
     }
     validateDependsOn(cfg);
     validateDefaultInclude(cfg);
+    try {
+        validatePrimeArtifacts(cfg);
+    } catch (err) {
+        if (!tolerateInvalidPrimeArtifacts) {
+            throw err;
+        }
+        console.warn(
+            `! ${err instanceof Error ? err.message : String(err)}\n` +
+                `  Continuing: this command does not prime artifacts. Fix the manifest ` +
+                `before creating a group or adding a member.`,
+        );
+    }
+}
+
+const PRIME_STRATEGIES: readonly PrimeStrategy[] = ["copy", "reflink", "symlink"];
+
+// Structural and collision checks for both priming tiers. These run at load,
+// not when the prime phase runs: a manifest-level entry is read by every repo,
+// so a malformed one would otherwise fail every member's prime after the
+// worktrees already exist. artifacts.ts keeps its own throws as defence in
+// depth for callers that build specs by hand.
+function validatePrimeArtifacts(cfg: MultreeConfig): void {
+    validatePrimeList("Manifest-level prime_artifacts", cfg.prime_artifacts);
+    for (const [name, repo] of Object.entries(cfg.repos)) {
+        validatePrimeList(`Repo "${name}" prime_artifacts`, repo.prime_artifacts);
+    }
+    // Collisions are checked against each repo's EFFECTIVE list, so an
+    // inherited entry is caught for every repo that inherits it — the common
+    // case, and the one a declared-only check would miss.
+    for (const [name, repo] of Object.entries(cfg.repos)) {
+        validatePrimeCollisions(cfg, name, repo);
+    }
+}
+
+function validatePrimeList(where: string, specs: PrimeArtifactSpec[] | undefined): void {
+    if (specs === undefined) {
+        return;
+    }
+    if (!Array.isArray(specs)) {
+        throw new Error(`${where}: must be a list of entries`);
+    }
+    const claimed = new Set<string>();
+    for (const spec of specs) {
+        const hasPath = spec.path !== undefined;
+        const hasFind = spec.find !== undefined;
+        if (hasPath && hasFind) {
+            throw new Error(`${where}: specify either 'path' or 'find', not both`);
+        }
+        if (!hasPath && !hasFind) {
+            throw new Error(`${where}: must specify 'path' or 'find'`);
+        }
+        const field = hasPath ? "path" : "find";
+        const value = hasPath ? spec.path : spec.find;
+        if (typeof value !== "string" || value.trim() === "") {
+            throw new Error(`${where}: ${field} must be a non-empty string`);
+        }
+        if (spec.strategy !== undefined && !PRIME_STRATEGIES.includes(spec.strategy)) {
+            throw new Error(
+                `${where}: unknown strategy "${spec.strategy}" ` +
+                    `(expected ${PRIME_STRATEGIES.join(", ")})`,
+            );
+        }
+        const key = `${field}:${value}`;
+        if (claimed.has(key)) {
+            throw new Error(`${where}: declares ${field} "${value}" more than once`);
+        }
+        claimed.add(key);
+    }
+}
+
+// Env files this repo wires: multree writes consumes blocks into them and reads
+// exposes out of them. A symlink over one writes through to the main checkout,
+// which is the one priming collision multree can prove is wrong.
+function wiredFiles(repoCfg: RepoConfig): { file: string; source: string }[] {
+    const out: { file: string; source: string }[] = [];
+    for (const spec of Object.values(repoCfg.exposes ?? {})) {
+        if (typeof spec?.file === "string") {
+            out.push({ file: spec.file, source: "exposes" });
+        }
+    }
+    const consumes = repoCfg.consumes === undefined
+        ? []
+        : (Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes]);
+    for (const spec of consumes) {
+        if (typeof spec?.file === "string") {
+            out.push({ file: spec.file, source: "consumes" });
+        }
+    }
+    return out;
+}
+
+// Worktree-relative form for comparison. Trailing slashes and a leading "./"
+// are noise; everything else is compared on segment boundaries so "conf" never
+// matches "config/app.env".
+function normalizeWorktreeRelative(p: string): string {
+    const normalized = normalize(p).replace(/\/+$/, "");
+    return normalized === "." ? "" : normalized;
+}
+
+function validatePrimeCollisions(
+    cfg: MultreeConfig,
+    repoName: string,
+    repoCfg: RepoConfig,
+): void {
+    const wired = wiredFiles(repoCfg);
+    if (wired.length === 0) {
+        return;
+    }
+    const own = repoCfg.prime_artifacts ?? [];
+    for (const spec of resolvePrimeArtifacts(cfg, repoCfg)) {
+        // `find` matches can't be enumerated before the source repo is walked,
+        // so a find-addressed entry is deliberately left unchecked.
+        if (spec.strategy !== "symlink" || spec.path === undefined) {
+            continue;
+        }
+        const link = normalizeWorktreeRelative(spec.path);
+        for (const { file, source } of wired) {
+            const target = normalizeWorktreeRelative(file);
+            if (target !== link && !target.startsWith(`${link}/`)) {
+                continue;
+            }
+            const where = own.includes(spec)
+                ? `Repo "${repoName}" prime_artifacts`
+                : `Manifest-level prime_artifacts (inherited by repo "${repoName}")`;
+            throw new Error(
+                `${where}: symlink entry "${spec.path}" covers the ${source} file ` +
+                    `"${file}", so multree would write into repo "${repoName}"'s main ` +
+                    `checkout. Use copy or reflink for that path, or move the entry.`,
+            );
+        }
+    }
 }
 
 // Target and action names share the wiring/group-name character class so they

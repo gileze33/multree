@@ -5,7 +5,9 @@ import { deleteGroupDir, loadGroup } from "../state.ts";
 import { releaseGroupVariables } from "../variables.ts";
 
 export async function destroyCommand(name: string): Promise<void> {
-    const { config, home, profile } = loadConfig();
+    // Inspecting or tearing down an existing group never primes, so a
+    // priming-validation failure must not lock the user out of it.
+    const { config, home, profile } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);

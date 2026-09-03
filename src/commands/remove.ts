@@ -6,7 +6,9 @@ import { releaseMemberVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
 export async function removeCommand(groupName: string, repoName: string): Promise<void> {
-    const { config, home, profile } = loadConfig();
+    // Inspecting or tearing down an existing group never primes, so a
+    // priming-validation failure must not lock the user out of it.
+    const { config, home, profile } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
     const group = loadGroup(config, groupName);
     if (!group) {
         throw new Error(`Group not found: ${groupName}`);

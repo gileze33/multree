@@ -2,7 +2,9 @@ import { loadConfig } from "../config.ts";
 import { loadGroup } from "../state.ts";
 
 export function showCommand(name: string): void {
-    const { config } = loadConfig();
+    // Inspecting or tearing down an existing group never primes, so a
+    // priming-validation failure must not lock the user out of it.
+    const { config } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);

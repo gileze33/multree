@@ -28,7 +28,9 @@ function formatRelative(date: Date | null): string {
 }
 
 export async function listCommand(): Promise<void> {
-    const { config } = loadConfig();
+    // Inspecting or tearing down an existing group never primes, so a
+    // priming-validation failure must not lock the user out of it.
+    const { config } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
     const groups = listGroups(config);
     if (groups.length === 0) {
         console.log("No active worktree groups.");

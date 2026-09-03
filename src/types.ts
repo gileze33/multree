@@ -46,7 +46,13 @@ export interface NumberVariableSpec {
 
 export type VariableSpec = NumberVariableSpec;
 
-export type PrimeStrategy = "copy" | "reflink";
+// How an entry is materialised in the worktree:
+//   - "copy":    an independent duplicate of the tree.
+//   - "reflink": a copy-on-write clone where the filesystem supports one,
+//                falling back to a plain copy where it doesn't.
+//   - "symlink": a link to the path in the repo's main checkout, so reads and
+//                writes through it resolve there. Shared, not duplicated.
+export type PrimeStrategy = "copy" | "reflink" | "symlink";
 
 export interface PrimeArtifactSpec {
     // Exactly one of these:
