@@ -51,6 +51,22 @@ worktree_root: ~/dev/worktree
 # keys (and empty or duplicated lists) fail at config load.
 # default_include: [api, frontend]
 
+# Priming entries EVERY repo receives, so a shared list is written once instead
+# of repeated under each repo. A repo's own `prime_artifacts` extends this one;
+# where both name the same target, the repo's entry is the one applied.
+#
+# Priming runs when a repo JOINS a group, so an entry added here later reaches
+# only worktrees created from that point on. To apply one to an existing member,
+# `remove` it and `add` it back -- which deletes that worktree and anything
+# uncommitted in it, so commit first.
+# prime_artifacts:
+#     - find: node_modules
+#       strategy: reflink
+#     # Untracked local config every repo keeps in its main checkout. `symlink`
+#     # SHARES the file: writes through the worktree land in the main checkout.
+#     - path: .env.local.shared
+#       strategy: symlink
+
 tools:
     # `multree <tool> <group>` runs the configured command inside the chosen
     # worktree. `open_in` is a preference chain -- `$root` is the group folder,
@@ -110,11 +126,23 @@ repos:
         # Set to false to skip this repo in `multree push` (e.g. read-only
         # mirror). Defaults to true.
         # push: false
-        # APFS reflink large trees (node_modules etc.) from the main checkout
-        # into the worktree so install reconciles instead of cold-installing.
+        # Materialise paths from the main checkout into the new worktree
+        # before `install` runs. Target each entry with `path` (a literal
+        # worktree-relative path) or `find` (a basename located recursively --
+        # DIRECTORIES ONLY). Strategies: `copy` (default, an independent
+        # duplicate), `reflink` (a copy-on-write clone -- use it for big trees
+        # like node_modules so install reconciles instead of cold-installing),
+        # or `symlink`. This list EXTENDS the manifest-level one above.
         prime_artifacts:
             - find: node_modules
               strategy: reflink
+            # `symlink` links the worktree path at the main checkout's copy, so
+            # reads and writes resolve there. Good for untracked local config;
+            # think twice for a directory a build tool writes into, since every
+            # group then shares it. A link over a file this repo names in
+            # `consumes`/`exposes` is rejected at config load.
+            - path: config.local
+              strategy: symlink
 
     frontend:
         path: ~/dev/repo-b

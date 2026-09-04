@@ -87,7 +87,12 @@ Keep multiple discrete manifests — one per employer, project, or experiment �
 - `repos.<name>.variables.<key>` — a value multree generates and allocates for this repo when it joins a group, exposed automatically as `{<repo>.<key>}` with no `exposes` entry needed. The only pattern today is `type: number` drawn from an inclusive `[min, max]` range; the chosen value is unique across every group in *every* profile (the ledger lives at `<$MULTREE_HOME>/variables.json`), stays stable across `rewire`, and is reclaimed on `remove`/`destroy`. An exhausted range is a clear error rather than a collision. The optional `default` is what consumers resolve to when this repo is *not* in the group — it need not lie within `[min, max]`, so it can be a well-known shared port; a `defaults.<key>` entry overrides it.
 - `repos.<name>.consumes.upsert` — env keys to write into the new worktree's env file. Values are templated against the exposes context.
 - `repos.<name>.defaults.<key>` — fallback value when the repo isn't part of the group (e.g. point frontends at default dev port `5000` when the api isn't selected).
-- `repos.<name>.prime_artifacts` — APFS-reflink (macOS) or `--reflink=auto` (Linux) large trees like `node_modules` from the main checkout into the worktree so install reconciles instead of cold-installing.
+- `repos.<name>.prime_artifacts` — materialise paths from the main checkout into the new worktree before `install` runs. Each entry names its target with either `path` (a literal worktree-relative path) or `find` (a basename located recursively in the main checkout — **directories only**, so a `find` naming a file matches nothing), plus a `strategy`:
+  - `copy` (default) — an independent duplicate.
+  - `reflink` — a copy-on-write clone via APFS (macOS) or `--reflink=auto` (Linux), falling back to a plain copy elsewhere. Use it for large trees like `node_modules` so `install` reconciles instead of cold-installing.
+  - `symlink` — a link to the same path in the main checkout. Reads *and writes* through it resolve there, so the worktree shares the file rather than getting its own. Use it for untracked local config the main checkout already holds.
+
+  An entry is skipped when the main checkout lacks the source, or when the worktree path is already occupied; either way the reason is printed. This repo's own list extends the manifest-level `prime_artifacts` below.
 - `repos.<name>.commands.<target>.<action>` — repo-scoped runnable commands, dispatched as `multree <action> <group> <target>`. Each key under `commands` is a target (typically a package in a monorepo); each key under a target is an action verb you name yourself, so adding `run`/`build`/`test` costs a manifest key and no code. The reserved `cwd` key is the subdirectory every action runs in — omit it to run at the worktree root. An action's value is a shell string, an argv array, or `{ command, cwd }` to override the target's `cwd`; `{cwd}` is substituted, as for tools. Targets are addressed flat, so a target name must be unique across every repo in a group.
 - `repos.<name>.update_strategy` — `rebase` or `merge`; overrides the manifest-level default for `multree update`.
 - `repos.<name>.push` — set `false` to skip this repo in `multree push`. Defaults to `true`.
@@ -97,8 +102,22 @@ Keep multiple discrete manifests — one per employer, project, or experiment �
 - `parallel_setup` (top-level) — run the `setup` phase in parallel up to `jobs`, respecting `depends_on`. Defaults to `false` (setup runs serially because it often touches shared resources).
 - `hook_timeout` (top-level) — default timeout for any hook in any repo, overridden by per-repo `hooks.timeout` and per-hook `timeout`.
 - `default_include` (top-level) — list of repo keys `create` uses when `--include` is omitted, for the common case where most groups span the same repos. An explicit `--include` always wins. Unknown keys fail at config load (so a typo breaks every command, rather than surfacing halfway through a `create`), as do empty lists and duplicates.
+- `prime_artifacts` (top-level) — priming entries **every** repo receives, so a shared list is written once rather than repeated per repo. A repo's own `prime_artifacts` extends this one; where both name the same target, the repo's entry is the one applied, which is how a repo changes an inherited target's strategy without re-listing it. Structural problems (neither or both of `path`/`find`, an unknown strategy, a target repeated within one list) fail at config load rather than mid-`create`.
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
+
+#### Priming is a join-time phase
+
+`prime_artifacts` runs once, when a repo joins a group. An entry added to the manifest afterwards reaches worktrees created from that point on; existing members are left exactly as they are, and `rewire` does not re-prime. To apply a new entry to a member that already exists, `remove` it from the group and `add` it back. **`remove` deletes that member's worktree and everything uncommitted in it**, so commit or push the member first.
+
+#### Two hazards a symlink entry carries
+
+Both are consequences of sharing rather than duplicating, and multree deliberately makes them visible rather than illegal — it cannot tell which writes you meant to share:
+
+- **A linked path your repo ignores with a trailing-slash pattern leaves the worktree permanently dirty.** Git does not apply a trailing-slash `.gitignore` pattern (`build/`) to a *symlink* of that name, so the link shows up as untracked. The worktree then reads as dirty forever: `multree update` skips dirty members, and `status` and `list` keep reporting it.
+- **A linked directory that a build tool writes into is shared with the main checkout and with every other group.** An `install` in one worktree mutates all of them, which removes exactly the isolation `reflink` exists to give. Link config files freely; think twice before linking a directory anything writes to.
+
+multree rejects the one collision it can prove: a `path`-addressed `symlink` entry that covers a file the same repo names in `consumes` or `exposes`, since multree would then write its own managed block into your main checkout. A `find`-addressed entry is *not* checked — its matches can't be enumerated before the source repo is walked — so a `find` link is yours to get right.
 
 ## Worked example
 
