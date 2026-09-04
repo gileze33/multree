@@ -60,7 +60,7 @@ describe("primeArtifacts (copy strategy)", () => {
     });
 
     // `copy` and `reflink` keep a plain existence check; only `symlink` gained
-    // an lstat-based one (KTD3). A DANGLING link at the destination therefore
+    // an lstat-based one. A DANGLING link at the destination therefore
     // still reads as absent to these two, and the cpSync that follows aborts
     // the process with an uncatchable native exception. That predates this
     // change and is left alone deliberately — it has no test because

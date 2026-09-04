@@ -53,7 +53,7 @@ function resolveSources(repoPath: string, spec: PrimeArtifactSpec): string[] {
 // absent to a plain existence check, so re-priming would try to create over it
 // — and the creation that follows aborts rather than failing cleanly. `copy`
 // and `reflink` keep the existence check they have always used; widening it
-// would change behaviour for manifests already in use (KTD3).
+// would change behaviour for manifests already in use.
 function destinationOccupied(dst: string, strategy: PrimeStrategy): boolean {
     if (strategy !== "symlink") {
         return existsSync(dst);

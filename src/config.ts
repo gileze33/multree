@@ -130,11 +130,16 @@ export interface LoadedConfig {
 }
 
 export interface LoadOptions extends ResolveOptions {
-    // Commands that only inspect or tear down a group that already exists never
-    // run the prime phase, so a priming-validation failure must not lock the
-    // user out of the very commands they need to look at and clean up that
-    // group. Those commands pass true; everything else fails at load.
+    // Downgrade a priming-validation failure to a warning. Set via
+    // loadConfigForInspection(), which is the only sanctioned way to reach it.
     tolerateInvalidPrimeArtifacts?: boolean;
+}
+
+// The loader for commands that only inspect or tear down a group that already
+// exists. They never prime, so a priming-validation failure must not lock the
+// user out of the very commands they need to look at and clean that group up.
+export function loadConfigForInspection(opts: ResolveOptions = {}): LoadedConfig {
+    return loadConfig({ ...opts, tolerateInvalidPrimeArtifacts: true });
 }
 
 export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
@@ -204,6 +209,10 @@ function validate(cfg: MultreeConfig, tolerateInvalidPrimeArtifacts: boolean): v
 
 const PRIME_STRATEGIES: readonly PrimeStrategy[] = ["copy", "reflink", "symlink"];
 
+// Which field addresses a priming entry's target. `path` is a literal location,
+// `find` a basename searched for anywhere in the tree, so the two never collide.
+type PrimeTargetField = "path" | "find";
+
 // Structural and collision checks for both priming tiers. These run at load,
 // not when the prime phase runs: a manifest-level entry is read by every repo,
 // so a malformed one would otherwise fail every member's prime after the
@@ -239,7 +248,7 @@ function validatePrimeList(where: string, specs: PrimeArtifactSpec[] | undefined
         if (!hasPath && !hasFind) {
             throw new Error(`${where}: must specify 'path' or 'find'`);
         }
-        const field = hasPath ? "path" : "find";
+        const field: PrimeTargetField = hasPath ? "path" : "find";
         const value = hasPath ? spec.path : spec.find;
         if (typeof value !== "string" || value.trim() === "") {
             throw new Error(`${where}: ${field} must be a non-empty string`);
@@ -250,7 +259,7 @@ function validatePrimeList(where: string, specs: PrimeArtifactSpec[] | undefined
                     `(expected ${PRIME_STRATEGIES.join(", ")})`,
             );
         }
-        const key = `${field}:${value}`;
+        const key = primeTargetKeyOf(field, value);
         if (claimed.has(key)) {
             throw new Error(`${where}: declares ${field} "${value}" more than once`);
         }
@@ -261,11 +270,22 @@ function validatePrimeList(where: string, specs: PrimeArtifactSpec[] | undefined
 // Env files this repo wires: multree writes consumes blocks into them and reads
 // exposes out of them. A symlink over one writes through to the main checkout,
 // which is the one priming collision multree can prove is wrong.
-function wiredFiles(repoCfg: RepoConfig): { file: string; source: string }[] {
-    const out: { file: string; source: string }[] = [];
+interface WiredFile {
+    file: string;
+    source: "exposes" | "consumes";
+    // `file` in the comparison form, resolved once here rather than per entry
+    // the collision check walks.
+    target: string;
+}
+
+function wiredFiles(repoCfg: RepoConfig): WiredFile[] {
+    const out: WiredFile[] = [];
+    const add = (file: string, source: WiredFile["source"]): void => {
+        out.push({ file, source, target: normalizeWorktreeRelative(file) });
+    };
     for (const spec of Object.values(repoCfg.exposes ?? {})) {
         if (typeof spec?.file === "string") {
-            out.push({ file: spec.file, source: "exposes" });
+            add(spec.file, "exposes");
         }
     }
     const consumes = repoCfg.consumes === undefined
@@ -273,7 +293,7 @@ function wiredFiles(repoCfg: RepoConfig): { file: string; source: string }[] {
         : (Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes]);
     for (const spec of consumes) {
         if (typeof spec?.file === "string") {
-            out.push({ file: spec.file, source: "consumes" });
+            add(spec.file, "consumes");
         }
     }
     return out;
@@ -296,7 +316,16 @@ function validatePrimeCollisions(
     if (wired.length === 0) {
         return;
     }
-    const own = repoCfg.prime_artifacts ?? [];
+    // Which tier an entry came from, by target rather than object identity: a
+    // repo entry always claims its target ahead of the manifest's, so a
+    // surviving entry whose target the repo names is the repo's own.
+    const ownTargets = new Set<string>();
+    for (const spec of repoCfg.prime_artifacts ?? []) {
+        const key = primeTargetKey(spec);
+        if (key !== undefined) {
+            ownTargets.add(key);
+        }
+    }
     for (const spec of resolvePrimeArtifacts(cfg, repoCfg)) {
         // `find` matches can't be enumerated before the source repo is walked,
         // so a find-addressed entry is deliberately left unchecked.
@@ -304,12 +333,11 @@ function validatePrimeCollisions(
             continue;
         }
         const link = normalizeWorktreeRelative(spec.path);
-        for (const { file, source } of wired) {
-            const target = normalizeWorktreeRelative(file);
+        for (const { file, source, target } of wired) {
             if (target !== link && !target.startsWith(`${link}/`)) {
                 continue;
             }
-            const where = own.includes(spec)
+            const where = ownTargets.has(primeTargetKeyOf("path", spec.path))
                 ? `Repo "${repoName}" prime_artifacts`
                 : `Manifest-level prime_artifacts (inherited by repo "${repoName}")`;
             throw new Error(
@@ -533,15 +561,19 @@ export function canPush(repoCfg: RepoConfig): boolean {
 // anywhere in the tree — so the addressing field is part of the key. Returns
 // undefined for a structurally invalid entry (neither field, or both), which
 // validatePrimeArtifacts rejects at load; such an entry is never deduped.
+function primeTargetKeyOf(field: PrimeTargetField, value: string): string {
+    return `${field}:${value}`;
+}
+
 function primeTargetKey(spec: PrimeArtifactSpec): string | undefined {
     if (spec.path !== undefined && spec.find !== undefined) {
         return undefined;
     }
     if (spec.path !== undefined) {
-        return `path:${spec.path}`;
+        return primeTargetKeyOf("path", spec.path);
     }
     if (spec.find !== undefined) {
-        return `find:${spec.find}`;
+        return primeTargetKeyOf("find", spec.find);
     }
     return undefined;
 }

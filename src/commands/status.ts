@@ -1,4 +1,4 @@
-import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
+import { expandPath, loadConfigForInspection, resolveBranchBase } from "../config.ts";
 import {
     aheadBehind,
     currentBranch,
@@ -18,9 +18,7 @@ interface StatusArgs {
 }
 
 export function statusCommand(args: StatusArgs): void {
-    // Inspecting or tearing down an existing group never primes, so a
-    // priming-validation failure must not lock the user out of it.
-    const { config } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, args.name);
     if (!group) {
         throw new Error(`Group not found: ${args.name}`);

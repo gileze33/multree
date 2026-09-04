@@ -1,4 +1,4 @@
-import { expandPath, loadConfig } from "../config.ts";
+import { expandPath, loadConfigForInspection } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { loadGroup, saveGroup } from "../state.ts";
@@ -6,9 +6,7 @@ import { releaseMemberVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
 export async function removeCommand(groupName: string, repoName: string): Promise<void> {
-    // Inspecting or tearing down an existing group never primes, so a
-    // priming-validation failure must not lock the user out of it.
-    const { config, home, profile } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
+    const { config, home, profile } = loadConfigForInspection();
     const group = loadGroup(config, groupName);
     if (!group) {
         throw new Error(`Group not found: ${groupName}`);
