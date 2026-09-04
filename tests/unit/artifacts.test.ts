@@ -30,8 +30,8 @@ describe("primeArtifacts (copy strategy)", () => {
     afterEach(() => rmSync(root, { recursive: true, force: true }));
 
     it("is a no-op for empty specs", () => {
-        primeArtifacts(src, dst, undefined);
-        primeArtifacts(src, dst, []);
+        primeArtifacts("api", src, dst, undefined);
+        primeArtifacts("api", src, dst, []);
         assert.deepEqual([...readDirSafe(dst)], []);
     });
 
@@ -40,7 +40,7 @@ describe("primeArtifacts (copy strategy)", () => {
         mkdirSync(join(nm, "pkg"), { recursive: true });
         writeFileSync(join(nm, "pkg", "index.js"), "module.exports = 1;");
 
-        primeArtifacts(src, dst, [{ path: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ path: "node_modules", strategy: "copy" }]);
 
         const copied = join(dst, "node_modules", "pkg", "index.js");
         assert.equal(existsSync(copied), true);
@@ -53,7 +53,7 @@ describe("primeArtifacts (copy strategy)", () => {
         writeFileSync(join(src, "packages", "a", "node_modules", "marker"), "a");
         writeFileSync(join(src, "packages", "b", "node_modules", "marker"), "b");
 
-        primeArtifacts(src, dst, [{ find: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ find: "node_modules", strategy: "copy" }]);
 
         assert.equal(readFileSync(join(dst, "packages", "a", "node_modules", "marker"), "utf-8"), "a");
         assert.equal(readFileSync(join(dst, "packages", "b", "node_modules", "marker"), "utf-8"), "b");
@@ -71,34 +71,34 @@ describe("primeArtifacts (copy strategy)", () => {
         mkdirSync(join(dst, "node_modules"), { recursive: true });
         writeFileSync(join(dst, "node_modules", "marker"), "from-dst");
 
-        primeArtifacts(src, dst, [{ path: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ path: "node_modules", strategy: "copy" }]);
 
         assert.equal(readFileSync(join(dst, "node_modules", "marker"), "utf-8"), "from-dst");
     });
 
     it("does not fail when source path is missing", () => {
-        primeArtifacts(src, dst, [{ path: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ path: "node_modules", strategy: "copy" }]);
         assert.equal(existsSync(join(dst, "node_modules")), false);
     });
 
     it("defaults to 'copy' strategy when unspecified", () => {
         mkdirSync(join(src, "out"), { recursive: true });
         writeFileSync(join(src, "out", "marker"), "x");
-        primeArtifacts(src, dst, [{ path: "out" }]);
+        primeArtifacts("api", src, dst, [{ path: "out" }]);
         assert.equal(existsSync(join(dst, "out", "marker")), true);
     });
 
     it("rejects a spec with both 'path' and 'find'", () => {
-        assert.throws(() => primeArtifacts(src, dst, [{ path: "a", find: "b" }]), /either 'path' or 'find'/);
+        assert.throws(() => primeArtifacts("api", src, dst, [{ path: "a", find: "b" }]), /either 'path' or 'find'/);
     });
 
     it("rejects a spec with neither 'path' nor 'find'", () => {
-        assert.throws(() => primeArtifacts(src, dst, [{ strategy: "copy" }]), /must specify 'path' or 'find'/);
+        assert.throws(() => primeArtifacts("api", src, dst, [{ strategy: "copy" }]), /must specify 'path' or 'find'/);
     });
 
     it("is a no-op when 'find' matches nothing in the source", () => {
         mkdirSync(join(src, "irrelevant"), { recursive: true });
-        primeArtifacts(src, dst, [{ find: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ find: "node_modules", strategy: "copy" }]);
         assert.equal(existsSync(join(dst, "node_modules")), false);
     });
 
@@ -106,7 +106,7 @@ describe("primeArtifacts (copy strategy)", () => {
         mkdirSync(join(src, "deep", "nested", "node_modules"), { recursive: true });
         writeFileSync(join(src, "deep", "nested", "node_modules", "marker"), "x");
 
-        primeArtifacts(src, dst, [{ find: "node_modules", strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ find: "node_modules", strategy: "copy" }]);
         assert.equal(existsSync(join(dst, "deep", "nested", "node_modules", "marker")), true);
         assert.equal(existsSync(join(dst, "node_modules")), false);
     });
@@ -118,7 +118,7 @@ describe("primeArtifacts (copy strategy)", () => {
         const weird = "node$modules";
         mkdirSync(join(src, "packages", "a", weird), { recursive: true });
         writeFileSync(join(src, "packages", "a", weird, "marker"), "ok");
-        primeArtifacts(src, dst, [{ find: weird, strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ find: weird, strategy: "copy" }]);
         assert.equal(
             readFileSync(join(dst, "packages", "a", weird, "marker"), "utf-8"),
             "ok",
@@ -129,7 +129,7 @@ describe("primeArtifacts (copy strategy)", () => {
         const weird = "out$dir";
         mkdirSync(join(src, weird), { recursive: true });
         writeFileSync(join(src, weird, "marker"), "ok");
-        primeArtifacts(src, dst, [{ path: weird, strategy: "copy" }]);
+        primeArtifacts("api", src, dst, [{ path: weird, strategy: "copy" }]);
         assert.equal(readFileSync(join(dst, weird, "marker"), "utf-8"), "ok");
     });
 });
@@ -154,7 +154,7 @@ describe("primeArtifacts (symlink strategy)", () => {
     it("links the worktree path at its counterpart in the main checkout", () => {
         writeFileSync(join(src, "config.local"), "shared\n");
 
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
 
         const link = join(dst, "config.local");
         assert.equal(lstatSync(link).isSymbolicLink(), true);
@@ -164,7 +164,7 @@ describe("primeArtifacts (symlink strategy)", () => {
 
     it("makes a write through the link visible in the main checkout", () => {
         writeFileSync(join(src, "config.local"), "before\n");
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
 
         writeFileSync(join(dst, "config.local"), "after\n");
 
@@ -173,7 +173,7 @@ describe("primeArtifacts (symlink strategy)", () => {
 
     // AE3.
     it("skips a source the main checkout does not have, without erroring", () => {
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
         assert.equal(existsSync(join(dst, "config.local")), false);
     });
 
@@ -181,7 +181,7 @@ describe("primeArtifacts (symlink strategy)", () => {
         writeFileSync(join(src, "config.local"), "from-src\n");
         writeFileSync(join(dst, "config.local"), "from-dst\n");
 
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
 
         assert.equal(lstatSync(join(dst, "config.local")).isSymbolicLink(), false);
         assert.equal(readFileSync(join(dst, "config.local"), "utf-8"), "from-dst\n");
@@ -194,15 +194,15 @@ describe("primeArtifacts (symlink strategy)", () => {
         writeFileSync(join(src, "config.local"), "shared\n");
         symlinkSync(join(root, "gone"), join(dst, "config.local"));
 
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
 
         assert.equal(readlinkSync(join(dst, "config.local")), join(root, "gone"));
     });
 
     it("re-priming an already-linked worktree changes nothing", () => {
         writeFileSync(join(src, "config.local"), "shared\n");
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
-        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "config.local", strategy: "symlink" }]);
 
         assert.equal(readlinkSync(join(dst, "config.local")), join(src, "config.local"));
     });
@@ -211,7 +211,7 @@ describe("primeArtifacts (symlink strategy)", () => {
         mkdirSync(join(src, "deep", "nested"), { recursive: true });
         writeFileSync(join(src, "deep", "nested", "config.local"), "shared\n");
 
-        primeArtifacts(src, dst, [
+        primeArtifacts("api", src, dst, [
             { path: "deep/nested/config.local", strategy: "symlink" },
         ]);
 
@@ -227,7 +227,7 @@ describe("primeArtifacts (symlink strategy)", () => {
         writeFileSync(join(src, "packages", "a", "shared", "marker"), "a");
         writeFileSync(join(src, "packages", "b", "shared", "marker"), "b");
 
-        primeArtifacts(src, dst, [{ find: "shared", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ find: "shared", strategy: "symlink" }]);
 
         for (const pkg of ["a", "b"]) {
             const link = join(dst, "packages", pkg, "shared");
@@ -240,7 +240,7 @@ describe("primeArtifacts (symlink strategy)", () => {
         mkdirSync(join(src, "shared"), { recursive: true });
         writeFileSync(join(src, "shared", "marker"), "x");
 
-        primeArtifacts(src, dst, [{ path: "shared", strategy: "symlink" }]);
+        primeArtifacts("api", src, dst, [{ path: "shared", strategy: "symlink" }]);
 
         writeFileSync(join(dst, "shared", "added"), "y");
         assert.equal(readFileSync(join(src, "shared", "added"), "utf-8"), "y");

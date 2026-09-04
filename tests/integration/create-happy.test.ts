@@ -392,3 +392,127 @@ describe("prime_artifacts validation", () => {
         assert.equal(existsSync(join(sb.worktreeRoot, "g")), false);
     });
 });
+
+// R11/R12/R13: priming has to say what it did and what it skipped, attributed
+// to the repo it did it for, in the default output — a user should be able to
+// tell where each link points without opening the worktree.
+describe("create prime output", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    // AE6 + a repo prefix on every priming line.
+    it("prints each created link's path and target under its repo's prefix", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [
+                        { path: "config.local", strategy: "symlink" },
+                        { path: "cache", strategy: "copy" },
+                    ],
+                },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        writeFileSync(join(repo, "config.local"), "shared\n");
+        mkdirSync(join(repo, "cache"), { recursive: true });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        assert.match(
+            r.stdout,
+            new RegExp(`\\[api\\]\\s+config\\.local \\.\\.\\. linked -> ${join(repo, "config.local")}`),
+        );
+        // Every priming line carries the prefix, not just the phase banner.
+        const primeLines = r.stdout
+            .split("\n")
+            .filter(line => /priming|linked|skipped|prime complete/.test(line));
+        assert.ok(primeLines.length > 0, "no priming lines in output");
+        for (const line of primeLines) {
+            assert.match(line, /^\[api\]/, `unprefixed priming line: ${line}`);
+        }
+    });
+
+    // AE8.
+    it("reports an entry skipped for a missing source, and still exits zero", () => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" }],
+            primeArtifacts: [{ path: "never-here", strategy: "symlink" }],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped never-here \(not in /);
+    });
+
+    it("reports an occupied destination with its own distinct reason", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    // Committed, so the worktree already holds it.
+                    files: { "config.local": "tracked\n" },
+                    primeArtifacts: [{ path: "config.local", strategy: "symlink" }],
+                },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped config\.local \(destination already exists\)/);
+        assert.doesNotMatch(r.stdout, /skipped config\.local \(not in /);
+    });
+
+    it("reports a find entry that matched nothing, naming the search value", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ find: "build-cache", strategy: "copy" }],
+                },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped find "build-cache" \(no match in /);
+    });
+
+    // AE10.
+    it("lists a repo's inherited entries with targets and strategies in the dry run", () => {
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api" },
+                {
+                    key: "frontend",
+                    dirname: "fake-frontend",
+                    primeArtifacts: [{ path: "own-cache", strategy: "copy" }],
+                },
+            ],
+            primeArtifacts: [
+                { path: "config.local", strategy: "symlink" },
+                { find: "node_modules", strategy: "reflink" },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api,frontend", "--plan"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\] path config\.local \(symlink\)/);
+        assert.match(r.stdout, /\[api\] find node_modules \(reflink\)/);
+        assert.match(r.stdout, /\[frontend\] path own-cache \(copy\)/);
+        assert.doesNotMatch(r.stdout, /artifact spec\(s\)/);
+    });
+
+    it("reports none in the dry run for a repo with no entries at all", () => {
+        sb = createSandbox({ repos: [{ key: "api", dirname: "fake-api" }] });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api", "--plan"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /Phase prime[^\n]*\n\s+\[api\] \(none\)/);
+    });
+});

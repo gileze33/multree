@@ -29,7 +29,7 @@ export async function runMemberPhase(
         const specs = resolvePrimeArtifacts(config, repoCfg);
         if (specs.length > 0) {
             console.log(`[${repoName}] priming artifacts`);
-            primeArtifacts(repoPath, worktreePath, specs);
+            primeArtifacts(repoName, repoPath, worktreePath, specs);
         }
         return;
     }

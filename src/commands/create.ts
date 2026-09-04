@@ -326,8 +326,15 @@ function printPlan(
     console.log("");
     console.log(`Phase prime (parallel up to ${jobs}):`);
     for (const p of plans) {
-        const n = resolvePrimeArtifacts(config, p.repoCfg).length;
-        console.log(`  [${p.repoName}] ${n} artifact spec(s)`);
+        const specs = resolvePrimeArtifacts(config, p.repoCfg);
+        if (specs.length === 0) {
+            console.log(`  [${p.repoName}] (none)`);
+            continue;
+        }
+        for (const spec of specs) {
+            const target = spec.path !== undefined ? `path ${spec.path}` : `find ${spec.find}`;
+            console.log(`  [${p.repoName}] ${target} (${spec.strategy ?? "copy"})`);
+        }
     }
     console.log("");
     console.log(`Phase install (parallel up to ${jobs}):`);
