@@ -139,8 +139,10 @@ repos:
             # `symlink` links the worktree path at the main checkout's copy, so
             # reads and writes resolve there. Good for untracked local config;
             # think twice for a directory a build tool writes into, since every
-            # group then shares it. A link over a file this repo names in
-            # `consumes`/`exposes` is rejected at config load.
+            # group then shares it. A `path` link over a file this repo names in
+            # `consumes`/`exposes` is rejected at config load; a `find` link is
+            # NOT checked, because its matches aren't known until the source
+            # repo is walked.
             - path: config.local
               strategy: symlink
 

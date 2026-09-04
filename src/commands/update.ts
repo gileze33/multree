@@ -1,4 +1,9 @@
-import { expandPath, loadConfig, resolveBranchBase, resolveUpdateStrategy } from "../config.ts";
+import {
+    expandPath,
+    loadConfigForInspection,
+    resolveBranchBase,
+    resolveUpdateStrategy,
+} from "../config.ts";
 import { fetchRepo, isDirty, mergeFrom, rebaseOnto, refExists } from "../git.ts";
 import { loadGroup } from "../state.ts";
 import type { MultreeConfig, RepoConfig, UpdateStrategy } from "../types.ts";
@@ -10,7 +15,9 @@ interface UpdateArgs {
 }
 
 export function updateCommand(args: UpdateArgs): void {
-    const { config } = loadConfig();
+    // Never primes and never writes a member's env file, so a
+    // priming-validation failure must not block it.
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, args.name);
     if (!group) {
         throw new Error(`Group not found: ${args.name}`);

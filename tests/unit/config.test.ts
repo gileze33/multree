@@ -533,6 +533,35 @@ describe("loadConfig", () => {
         );
     });
 
+    // A bare `-` parses to null and a scalar entry to a string; both used to
+    // surface as a raw TypeError from the first field read.
+    it("rejects a null entry with a manifest error, not a TypeError", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      -\n"));
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: each entry must be a mapping/,
+        );
+    });
+
+    it("rejects a scalar entry with a manifest error", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      - node_modules\n"));
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: each entry must be a mapping/,
+        );
+    });
+
+    it("treats two surface forms of one path as the same target", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n      - path: ./cache\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: declares path "\.\/cache" more than once/,
+        );
+    });
+
     it("rejects an empty path value", () => {
         writeFileSync(join(home, "default.yaml"), primeYaml('      - path: ""\n'));
         assert.throws(() => loadConfig(), /path must be a non-empty string/);
@@ -680,6 +709,21 @@ describe("loadConfig", () => {
         assert.equal(config.repos.api.prime_artifacts?.[0].find, "config");
     });
 
+    it("catches a collision on a non-first entry of an array-form consumes", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\n' +
+                "    consumes:\n" +
+                "      - file: first.env\n        upsert:\n          A: a\n" +
+                "      - file: config/app.env\n        upsert:\n          B: b\n" +
+                "    prime_artifacts:\n      - path: config\n        strategy: symlink\n",
+        );
+        assert.throws(
+            () => loadConfig(),
+            /symlink entry "config" covers the consumes file "config\/app\.env"/,
+        );
+    });
+
     // R15: priming validation must not lock a user out of the commands that
     // inspect and tear down a group they already have on disk.
     it("still loads for inspection/teardown when only priming validation fails", () => {
@@ -688,8 +732,20 @@ describe("loadConfig", () => {
             primeYaml("      - path: cache\n        strategy: hardlink\n"),
         );
         assert.throws(() => loadConfig(), /unknown strategy "hardlink"/);
-        const { config } = loadConfig({ tolerateInvalidPrimeArtifacts: true });
-        assert.equal(config.repos.api.path, "/tmp/api");
+        const loaded = loadConfig({ tolerateInvalidPrimeArtifacts: true });
+        assert.equal(loaded.config.repos.api.path, "/tmp/api");
+        // Callers that go on to write into a worktree read this to know the
+        // symlink collision guard is not in force.
+        assert.equal(loaded.primeArtifactsValid, false);
+    });
+
+    it("reports prime_artifacts as valid when validation passes", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      - path: cache\n"));
+        assert.equal(loadConfig().primeArtifactsValid, true);
+        assert.equal(
+            loadConfig({ tolerateInvalidPrimeArtifacts: true }).primeArtifactsValid,
+            true,
+        );
     });
 
     it("still rejects non-priming errors for inspection/teardown", () => {

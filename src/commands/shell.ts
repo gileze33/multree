@@ -1,9 +1,11 @@
 import { spawnSync } from "child_process";
-import { loadConfig } from "../config.ts";
+import { loadConfigForInspection } from "../config.ts";
 import { groupDir, loadGroup } from "../state.ts";
 
 export function shellCommand(name: string, repo: string | undefined): void {
-    const { config } = loadConfig();
+    // Never primes and never writes a member's env file, so a
+    // priming-validation failure must not block it.
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);

@@ -42,7 +42,7 @@ src/
   state.ts          # per-group state file (.multree.json) read/write + group dir resolution
   git.ts            # fetch / worktree add / worktree remove wrappers around `git`
   hooks.ts          # normalise HookSpec, run install/setup/teardown shell commands
-  artifacts.ts      # prime_artifacts: copy or APFS reflink (cp -c) a path / find-by-basename
+  artifacts.ts      # prime_artifacts: copy, APFS reflink (cp -c), or symlink a path / find-by-basename
   env.ts            # parse + upsert managed-block env files (multree-managed sentinel comments)
   wiring.ts         # read exposes from each member, template + write consumes blocks
   variables.ts      # generate + allocate per-repo variables (e.g. ports); home-level uniqueness ledger

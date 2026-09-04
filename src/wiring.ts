@@ -2,6 +2,17 @@ import { join } from "path";
 import { parseEnvFile, removeManagedBlock, upsertManagedBlock } from "./env.ts";
 import type { ConsumeSpec, ExposeSpec, GroupState, MultreeConfig } from "./types.ts";
 
+// `consumes` accepts one spec or a list of them. Every reader needs the list
+// form, so the widening lives here rather than being re-derived per call site.
+export function asConsumesList(
+    consumes: ConsumeSpec | ConsumeSpec[] | undefined,
+): ConsumeSpec[] {
+    if (consumes === undefined) {
+        return [];
+    }
+    return Array.isArray(consumes) ? consumes : [consumes];
+}
+
 export function readExposes(
     memberPath: string,
     exposes: Record<string, ExposeSpec> | undefined,
@@ -170,7 +181,7 @@ export function wireGroup(config: MultreeConfig, group: GroupState): void {
         if (!repoCfg?.consumes) {
             continue;
         }
-        const specs = Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes];
+        const specs = asConsumesList(repoCfg.consumes);
         console.log(`[${repoName}] wiring env`);
         for (const spec of specs) {
             applyConsumes(member.path, spec, group.name, ctx, meta);

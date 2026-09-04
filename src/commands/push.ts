@@ -1,4 +1,4 @@
-import { canPush, loadConfig } from "../config.ts";
+import { canPush, loadConfigForInspection } from "../config.ts";
 import { currentBranch, pushBranch } from "../git.ts";
 import { loadGroup } from "../state.ts";
 import { exitIfAnyFailed, indent, printSummary, type SummaryOutcome } from "./_outcomes.ts";
@@ -11,7 +11,9 @@ interface PushArgs {
 }
 
 export function pushCommand(args: PushArgs): void {
-    const { config } = loadConfig();
+    // Never primes and never writes a member's env file, so a
+    // priming-validation failure must not block it.
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, args.name);
     if (!group) {
         throw new Error(`Group not found: ${args.name}`);

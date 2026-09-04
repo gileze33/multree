@@ -289,6 +289,9 @@ describe("create with manifest-level prime_artifacts", () => {
         );
     });
 
+    // AE1. The two tiers must use DIFFERENT strategies for this to be able to
+    // fail: with the same strategy on both, applying either entry produces an
+    // identical worktree and the test proves nothing.
     it("applies a repo's own entry to a target the manifest also declares", () => {
         sb = createSandbox({
             repos: [
@@ -300,7 +303,7 @@ describe("create with manifest-level prime_artifacts", () => {
                 },
                 { key: "frontend", dirname: "fake-frontend" },
             ],
-            primeArtifacts: [{ path: "shared-one", strategy: "copy" }],
+            primeArtifacts: [{ path: "shared-one", strategy: "symlink" }],
         });
         for (const key of ["api", "frontend"]) {
             const repo = sb.repoPath(key);
@@ -311,14 +314,15 @@ describe("create with manifest-level prime_artifacts", () => {
         const r = runMultree(sb, ["create", "g", "--include", "api,frontend"]);
         assert.equal(r.status, 0, r.stderr);
 
-        assert.equal(
-            readFileSync(join(sb.worktreePath("g", "api"), "shared-one", "marker"), "utf-8"),
-            "api",
-        );
-        assert.equal(
-            readFileSync(join(sb.worktreePath("g", "frontend"), "shared-one", "marker"), "utf-8"),
-            "frontend",
-        );
+        // api overrode the inherited symlink with its own copy...
+        const apiEntry = join(sb.worktreePath("g", "api"), "shared-one");
+        assert.equal(lstatSync(apiEntry).isSymbolicLink(), false);
+        assert.equal(readFileSync(join(apiEntry, "marker"), "utf-8"), "api");
+
+        // ...while frontend, declaring nothing, got the inherited symlink.
+        const frontendEntry = join(sb.worktreePath("g", "frontend"), "shared-one");
+        assert.equal(lstatSync(frontendEntry).isSymbolicLink(), true);
+        assert.equal(readFileSync(join(frontendEntry, "marker"), "utf-8"), "frontend");
     });
 
     // AE7: priming is a join-time phase, so a shared entry added after a group
@@ -368,6 +372,44 @@ describe("prime_artifacts validation", () => {
 
     afterEach(() => sb.cleanup());
 
+    it("never wires through a symlink when the collision guard was tolerated", () => {
+        // The guard exists to stop multree writing its managed block through a
+        // primed symlink into the repo's MAIN CHECKOUT. remove tolerates an
+        // invalid manifest so teardown still works, so it must not also wire.
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ path: ".env.local", strategy: "symlink" }],
+                },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        const apiRepo = sb.repoPath("api");
+        writeFileSync(join(apiRepo, ".env.local"), "MAIN=original\n");
+
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api,frontend"]).status, 0);
+        assert.equal(lstatSync(join(sb.worktreePath("g", "api"), ".env.local")).isSymbolicLink(), true);
+
+        // The operator now adds a consumes entry over the already-linked file.
+        sb.updateManifest(cfg => {
+            cfg.repos.api.consumes = { file: ".env.local", upsert: { INJECTED: "yes" } };
+        });
+
+        // create and rewire refuse outright.
+        assert.notEqual(runMultree(sb, ["create", "g2", "--include", "api"]).status, 0);
+        assert.notEqual(runMultree(sb, ["rewire", "g"]).status, 0);
+
+        const r = runMultree(sb, ["remove", "g", "frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stderr, /Skipping re-wire/);
+
+        // The main checkout is untouched, and the removal still persisted.
+        assert.equal(readFileSync(join(apiRepo, ".env.local"), "utf-8"), "MAIN=original\n");
+        assert.deepEqual(Object.keys(sb.state("g")!.members), ["api"]);
+    });
+
     it("blocks create but still allows show and destroy", () => {
         sb = createSandbox({ repos: [{ key: "api", dirname: "fake-api" }] });
         assert.equal(runMultree(sb, ["create", "g", "--include", "api"]).status, 0);
@@ -386,6 +428,15 @@ describe("prime_artifacts validation", () => {
         assert.equal(shown.status, 0, shown.stderr);
         assert.match(shown.stdout, /Group: g/);
         assert.match(shown.stderr, /unknown strategy "hardlink"/);
+
+        // Every command that neither primes nor writes a member's env file
+        // stays reachable, not just the two above.
+        // `push` is omitted only because this sandbox's repos have no remote,
+        // not because it is excluded from the tolerant set.
+        for (const args of [["list"], ["status", "g"], ["update", "g"]]) {
+            const r = runMultree(sb, args);
+            assert.equal(r.status, 0, `${args.join(" ")} failed:\n${r.stderr}`);
+        }
 
         const destroyed = runMultree(sb, ["destroy", "g"]);
         assert.equal(destroyed.status, 0, destroyed.stderr);

@@ -10,7 +10,12 @@ import {
 } from "../git.ts";
 import { loadGroup } from "../state.ts";
 import type { ConsumeSpec, MultreeConfig } from "../types.ts";
-import { buildContext, buildMetaContext, resolveTemplate } from "../wiring.ts";
+import {
+    asConsumesList,
+    buildContext,
+    buildMetaContext,
+    resolveTemplate,
+} from "../wiring.ts";
 
 interface StatusArgs {
     name: string;
@@ -94,7 +99,7 @@ function describeConsumes(
     if (!consumes) {
         return [];
     }
-    const specs = Array.isArray(consumes) ? consumes : [consumes];
+    const specs = asConsumesList(consumes);
     const lines: string[] = [];
     for (const spec of specs) {
         lines.push(`${spec.file}:`);

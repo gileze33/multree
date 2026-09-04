@@ -4,6 +4,7 @@ import { isAbsolute, join, normalize, resolve } from "path";
 import { parse } from "yaml";
 import { SUBCOMMANDS } from "./completion.ts";
 import { detectCycle } from "./scheduler.ts";
+import { asConsumesList } from "./wiring.ts";
 import type {
     ActionSpec,
     MainCheckoutAction,
@@ -122,6 +123,12 @@ export function resolveManifest(opts: ResolveOptions = {}): ResolvedManifest {
 export interface LoadedConfig {
     config: MultreeConfig;
     path: string;
+    // False when priming validation failed and the caller tolerated it. A
+    // caller that goes on to WRITE into a member's worktree must check this:
+    // the collision guard is what stops multree writing through a primed
+    // symlink into the main checkout, so a tolerated failure means that
+    // protection is not in force.
+    primeArtifactsValid: boolean;
     // Resolved profile name (after one alias hop) and the $MULTREE_HOME
     // directory it was loaded from. Commands thread these into the variables
     // ledger so allocations are keyed by profile and shared across profiles.
@@ -157,10 +164,11 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
         throw new Error(buildMissingManifestError(resolved));
     }
     const config = parse(readFileSync(resolved.path, "utf-8")) as MultreeConfig;
-    validate(config, opts.tolerateInvalidPrimeArtifacts === true);
+    const primeArtifactsValid = validate(config, opts.tolerateInvalidPrimeArtifacts === true);
     return {
         config,
         path: resolved.path,
+        primeArtifactsValid,
         profile: resolved.resolvedProfile,
         home: resolved.home,
     };
@@ -177,7 +185,9 @@ function buildMissingManifestError(resolved: ResolvedManifest): string {
     );
 }
 
-function validate(cfg: MultreeConfig, tolerateInvalidPrimeArtifacts: boolean): void {
+// Returns whether priming validation passed. It only ever returns false when
+// the caller opted to tolerate the failure; otherwise it throws.
+function validate(cfg: MultreeConfig, tolerateInvalidPrimeArtifacts: boolean): boolean {
     if (cfg.version !== 1) {
         throw new Error(`Unsupported config version: ${cfg.version} (expected 1)`);
     }
@@ -204,7 +214,9 @@ function validate(cfg: MultreeConfig, tolerateInvalidPrimeArtifacts: boolean): v
                 `  Continuing: this command does not prime artifacts. Fix the manifest ` +
                 `before creating a group or adding a member.`,
         );
+        return false;
     }
+    return true;
 }
 
 const PRIME_STRATEGIES: readonly PrimeStrategy[] = ["copy", "reflink", "symlink"];
@@ -240,6 +252,11 @@ function validatePrimeList(where: string, specs: PrimeArtifactSpec[] | undefined
     }
     const claimed = new Set<string>();
     for (const spec of specs) {
+        // A bare `-` or a scalar entry parses to null / a string. Reading a
+        // field off it would throw a raw TypeError instead of a manifest error.
+        if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
+            throw new Error(`${where}: each entry must be a mapping with 'path' or 'find'`);
+        }
         const hasPath = spec.path !== undefined;
         const hasFind = spec.find !== undefined;
         if (hasPath && hasFind) {
@@ -288,10 +305,7 @@ function wiredFiles(repoCfg: RepoConfig): WiredFile[] {
             add(spec.file, "exposes");
         }
     }
-    const consumes = repoCfg.consumes === undefined
-        ? []
-        : (Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes]);
-    for (const spec of consumes) {
+    for (const spec of asConsumesList(repoCfg.consumes)) {
         if (typeof spec?.file === "string") {
             add(spec.file, "consumes");
         }
@@ -561,8 +575,13 @@ export function canPush(repoCfg: RepoConfig): boolean {
 // anywhere in the tree — so the addressing field is part of the key. Returns
 // undefined for a structurally invalid entry (neither field, or both), which
 // validatePrimeArtifacts rejects at load; such an entry is never deduped.
+// `path` values are compared in their normalized form so "cache" and "./cache"
+// are one target; a `find` value is a basename, not a path, so it is left as
+// written.
 function primeTargetKeyOf(field: PrimeTargetField, value: string): string {
-    return `${field}:${value}`;
+    return field === "path"
+        ? `path:${normalizeWorktreeRelative(value)}`
+        : `find:${value}`;
 }
 
 function primeTargetKey(spec: PrimeArtifactSpec): string | undefined {

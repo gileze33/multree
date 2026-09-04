@@ -119,6 +119,15 @@ Both are consequences of sharing rather than duplicating, and multree deliberate
 
 multree rejects the one collision it can prove: a `path`-addressed `symlink` entry that covers a file the same repo names in `consumes` or `exposes`, since multree would then write its own managed block into your main checkout. A `find`-addressed entry is *not* checked — its matches can't be enumerated before the source repo is walked — so a `find` link is yours to get right.
 
+#### Upgrading: two `prime_artifacts` shapes now fail at load
+
+Priming entries are validated when the manifest loads, which rejects two shapes that used to load and then misbehave quietly:
+
+- **A misspelled `strategy`** (`reflnk`, `hardlink`) previously fell through to a plain `copy`. It is now an error naming the value.
+- **The same target listed twice in one block** was previously a silent no-op on the second entry. It is now an error naming the repo and the target.
+
+Both are manifest typos rather than working configurations, so the fix is to correct the entry. If one blocks you mid-task, the commands that inspect and tear down an existing group — `list`, `show`, `status`, `update`, `push`, `shell`, `remove`, `destroy`, and your `tools` — still run, and print the error as a warning. `create`, `add` and `rewire` do not, because they act on the entry.
+
 ## Worked example
 
 With an `api` and `frontend` repo declared in your manifest (see [`multree.config.example.yaml`](./multree.config.example.yaml) for the full shape, including `exposes`/`consumes` wiring), run:
