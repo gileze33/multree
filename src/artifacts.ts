@@ -47,17 +47,13 @@ function resolveSources(repoPath: string, spec: PrimeArtifactSpec): string[] {
     throw new Error("prime_artifacts: must specify 'path' or 'find'");
 }
 
-// Whether the destination is already taken, per strategy.
-//
-// `symlink` needs an lstat: a link whose own target has gone missing reads as
-// absent to a plain existence check, so re-priming would try to create over it
-// — and the creation that follows aborts rather than failing cleanly. `copy`
-// and `reflink` keep the existence check they have always used; widening it
-// would change behaviour for manifests already in use.
-function destinationOccupied(dst: string, strategy: PrimeStrategy): boolean {
-    if (strategy !== "symlink") {
-        return existsSync(dst);
-    }
+// Whether the destination is already taken. lstat, not an existence check: a
+// link whose own target has gone missing reads as absent to `existsSync`, so
+// priming would try to create over it. That is not a clean failure for any
+// strategy — `cpSync` onto a dangling link aborts the process with a native
+// exception no `try`/`catch` can hold, and `symlinkSync` throws EEXIST — so
+// all three strategies treat an existing link as occupied and skip it.
+function destinationOccupied(dst: string): boolean {
     try {
         lstatSync(dst);
         return true;
@@ -148,7 +144,7 @@ export function primeArtifacts(
                 say(`skipped ${rel} (not in ${repoPath})`);
                 continue;
             }
-            if (destinationOccupied(dst, strategy)) {
+            if (destinationOccupied(dst)) {
                 say(`skipped ${rel} (destination already exists)`);
                 continue;
             }

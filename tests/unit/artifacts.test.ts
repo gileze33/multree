@@ -59,12 +59,6 @@ describe("primeArtifacts (copy strategy)", () => {
         assert.equal(readFileSync(join(dst, "packages", "b", "node_modules", "marker"), "utf-8"), "b");
     });
 
-    // `copy` and `reflink` keep a plain existence check; only `symlink` gained
-    // an lstat-based one. A DANGLING link at the destination therefore
-    // still reads as absent to these two, and the cpSync that follows aborts
-    // the process with an uncatchable native exception. That predates this
-    // change and is left alone deliberately — it has no test because
-    // exercising it kills the test runner.
     it("skips destinations that already exist", () => {
         mkdirSync(join(src, "node_modules"), { recursive: true });
         writeFileSync(join(src, "node_modules", "marker"), "from-src");
@@ -124,6 +118,23 @@ describe("primeArtifacts (copy strategy)", () => {
             "ok",
         );
     });
+
+    // Regression: a dangling link at the destination used to read as absent to
+    // `copy`/`reflink`'s existence check, and the cpSync that followed aborted
+    // the whole process with a native exception no try/catch could hold. The
+    // occupancy test is lstat-based for every strategy, so it is now a skip.
+    for (const strategy of ["copy", "reflink"] as const) {
+        it(`leaves a dangling destination link in place under ${strategy}`, () => {
+            mkdirSync(join(src, "out"), { recursive: true });
+            writeFileSync(join(src, "out", "marker"), "x");
+            symlinkSync(join(root, "gone"), join(dst, "out"));
+
+            primeArtifacts("api", src, dst, [{ path: "out", strategy }]);
+
+            assert.equal(lstatSync(join(dst, "out")).isSymbolicLink(), true);
+            assert.equal(readlinkSync(join(dst, "out")), join(root, "gone"));
+        });
+    }
 
     it("'path' handles a directory name containing a $ character", () => {
         const weird = "out$dir";
