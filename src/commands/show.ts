@@ -1,8 +1,8 @@
-import { loadConfig } from "../config.ts";
+import { loadConfigForInspection } from "../config.ts";
 import { loadGroup } from "../state.ts";
 
 export function showCommand(name: string): void {
-    const { config } = loadConfig();
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);

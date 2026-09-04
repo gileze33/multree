@@ -1,4 +1,4 @@
-import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
+import { expandPath, loadConfigForInspection, resolveBranchBase } from "../config.ts";
 import {
     aheadBehind,
     currentBranch,
@@ -10,7 +10,12 @@ import {
 } from "../git.ts";
 import { loadGroup } from "../state.ts";
 import type { ConsumeSpec, MultreeConfig } from "../types.ts";
-import { buildContext, buildMetaContext, resolveTemplate } from "../wiring.ts";
+import {
+    asConsumesList,
+    buildContext,
+    buildMetaContext,
+    resolveTemplate,
+} from "../wiring.ts";
 
 interface StatusArgs {
     name: string;
@@ -18,7 +23,7 @@ interface StatusArgs {
 }
 
 export function statusCommand(args: StatusArgs): void {
-    const { config } = loadConfig();
+    const { config } = loadConfigForInspection();
     const group = loadGroup(config, args.name);
     if (!group) {
         throw new Error(`Group not found: ${args.name}`);
@@ -94,7 +99,7 @@ function describeConsumes(
     if (!consumes) {
         return [];
     }
-    const specs = Array.isArray(consumes) ? consumes : [consumes];
+    const specs = asConsumesList(consumes);
     const lines: string[] = [];
     for (const spec of specs) {
         lines.push(`${spec.file}:`);

@@ -17,7 +17,7 @@ import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { updateCommand } from "./commands/update.ts";
 import { SUBCOMMANDS } from "./completion.ts";
-import { loadConfig, setProfileFromFlag } from "./config.ts";
+import { loadConfig, loadConfigForInspection, setProfileFromFlag } from "./config.ts";
 import { toolCommand } from "./tools.ts";
 import type { UpdateStrategy } from "./types.ts";
 import { kickBackgroundCheck, notifyIfNewer, runUpdateCheck } from "./update-check.ts";
@@ -319,7 +319,9 @@ async function main(): Promise<void> {
                     help();
                     process.exit(1);
                 }
-                const { config } = loadConfig();
+                // Tool and repo-command dispatch never primes, so a broken
+                // prime_artifacts entry must not take them down too.
+                const { config } = loadConfigForInspection();
                 if (config.tools?.[cmd]) {
                     toolCommand(cmd, requireGroup(positional, cmd));
                 } else if (collectActionVerbs(config).has(cmd)) {

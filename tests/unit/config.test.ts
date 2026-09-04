@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { expandPath, loadConfig, resolveBranchBase } from "../../src/config.ts";
+import {
+    expandPath,
+    loadConfig,
+    resolveBranchBase,
+    resolvePrimeArtifacts,
+} from "../../src/config.ts";
+import type { MultreeConfig, PrimeArtifactSpec, RepoConfig } from "../../src/types.ts";
 
 describe("expandPath", () => {
     // Env var test hygiene: we manipulate process.env in this block, snapshot
@@ -165,6 +171,104 @@ describe("resolveBranchBase", () => {
 
     it("falls back to origin/main when no override is set", () => {
         assert.equal(resolveBranchBase({}), "origin/main");
+    });
+});
+
+// A repo's effective priming list is the manifest-level entries plus its own,
+// with the repo's entry winning for any target both tiers declare.
+describe("resolvePrimeArtifacts", () => {
+    const build = (
+        manifest: PrimeArtifactSpec[] | undefined,
+        repo: PrimeArtifactSpec[] | undefined,
+    ): { cfg: MultreeConfig; repoCfg: RepoConfig } => {
+        const repoCfg: RepoConfig = { path: "/tmp/api", prime_artifacts: repo };
+        return {
+            cfg: { version: 1, repos: { api: repoCfg }, prime_artifacts: manifest },
+            repoCfg,
+        };
+    };
+
+    it("gives a repo that declares nothing every manifest-level entry", () => {
+        const { cfg, repoCfg } = build(
+            [
+                { path: "config.local", strategy: "copy" },
+                { find: "node_modules", strategy: "reflink" },
+            ],
+            undefined,
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "config.local", strategy: "copy" },
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    it("gives a repo with its own entries those plus the manifest-level ones", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "node_modules", strategy: "reflink" }],
+            [{ path: "cache", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "cache", strategy: "copy" },
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    // AE1: the repo's entry is the one applied to a shared target, and the
+    // manifest's entry for it is dropped rather than applied second.
+    it("lets a repo entry replace a manifest entry for the same path", () => {
+        const { cfg, repoCfg } = build(
+            [{ path: "config.local", strategy: "reflink" }],
+            [{ path: "config.local", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "config.local", strategy: "copy" },
+        ]);
+    });
+
+    it("lets a repo entry replace a manifest entry for the same find value", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "node_modules", strategy: "reflink" }],
+            [{ find: "node_modules", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { find: "node_modules", strategy: "copy" },
+        ]);
+    });
+
+    // `path: x` and `find: x` are different targets: one is a literal location,
+    // the other a basename searched for anywhere in the tree.
+    it("treats a path and a find naming the same string as separate targets", () => {
+        const { cfg, repoCfg } = build(
+            [{ find: "cache", strategy: "reflink" }],
+            [{ path: "cache", strategy: "copy" }],
+        );
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { path: "cache", strategy: "copy" },
+            { find: "cache", strategy: "reflink" },
+        ]);
+    });
+
+    it("orders a repo's own entries ahead of the inherited ones", () => {
+        const { cfg, repoCfg } = build(
+            [{ path: "shared-a" }, { path: "shared-b" }],
+            [{ path: "own-a" }, { path: "own-b" }],
+        );
+        assert.deepEqual(
+            resolvePrimeArtifacts(cfg, repoCfg).map(spec => spec.path),
+            ["own-a", "own-b", "shared-a", "shared-b"],
+        );
+    });
+
+    it("leaves per-repo behaviour unchanged when the manifest declares none", () => {
+        const { cfg, repoCfg } = build(undefined, [{ find: "node_modules", strategy: "reflink" }]);
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), [
+            { find: "node_modules", strategy: "reflink" },
+        ]);
+    });
+
+    it("returns an empty list when neither tier declares anything", () => {
+        const { cfg, repoCfg } = build(undefined, undefined);
+        assert.deepEqual(resolvePrimeArtifacts(cfg, repoCfg), []);
     });
 });
 
@@ -399,5 +503,256 @@ describe("loadConfig", () => {
         writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, frontend]\n`);
         const { config } = loadConfig();
         assert.deepEqual(config.default_include, ["api", "frontend"]);
+    });
+
+    // prime_artifacts is validated at load rather than when the prime phase
+    // runs: a manifest-level entry is read by every repo, so a malformed one
+    // would otherwise fail every member's prime after the worktrees exist.
+    const API = 'version: 1\nrepos:\n  api:\n    path: /tmp/api\n';
+    const primeYaml = (repoEntries: string, manifestEntries?: string): string =>
+        API +
+        (repoEntries === "" ? "" : `    prime_artifacts:\n${repoEntries}`) +
+        (manifestEntries === undefined ? "" : `prime_artifacts:\n${manifestEntries}`);
+
+    it("rejects a repo entry declaring both path and find", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n        find: cache\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: specify either 'path' or 'find', not both/,
+        );
+    });
+
+    it("rejects a repo entry declaring neither path nor find", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      - strategy: copy\n"));
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: must specify 'path' or 'find'/,
+        );
+    });
+
+    // A bare `-` parses to null and a scalar entry to a string; both used to
+    // surface as a raw TypeError from the first field read.
+    it("rejects a null entry with a manifest error, not a TypeError", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      -\n"));
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: each entry must be a mapping/,
+        );
+    });
+
+    it("rejects a scalar entry with a manifest error", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      - node_modules\n"));
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: each entry must be a mapping/,
+        );
+    });
+
+    it("treats two surface forms of one path as the same target", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n      - path: ./cache\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: declares path "\.\/cache" more than once/,
+        );
+    });
+
+    it("rejects an empty path value", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml('      - path: ""\n'));
+        assert.throws(() => loadConfig(), /path must be a non-empty string/);
+    });
+
+    it("rejects an unknown strategy, naming the offending value", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n        strategy: hardlink\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: unknown strategy "hardlink"/,
+        );
+    });
+
+    // AE9.
+    it("rejects a repo repeating a target within its own list", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n      - path: cache\n        strategy: reflink\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: declares path "cache" more than once/,
+        );
+    });
+
+    it("accepts a repo declaring the same string as a path and as a find", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n      - find: cache\n"),
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.api.prime_artifacts?.length, 2);
+    });
+
+    it("rejects a manifest-level entry declaring both path and find", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("", "  - path: cache\n    find: cache\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Manifest-level prime_artifacts: specify either 'path' or 'find', not both/,
+        );
+    });
+
+    it("rejects a manifest-level entry naming an unknown strategy", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("", "  - path: cache\n    strategy: hardlink\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Manifest-level prime_artifacts: unknown strategy "hardlink"/,
+        );
+    });
+
+    it("rejects a target repeated within the manifest-level list", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("", "  - find: node_modules\n  - find: node_modules\n"),
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Manifest-level prime_artifacts: declares find "node_modules" more than once/,
+        );
+    });
+
+    // The collision guard: a symlink writes through to the main checkout, so a
+    // link over a file multree itself wires would corrupt the source repo.
+    const CONSUMER =
+        'version: 1\nrepos:\n  api:\n    path: /tmp/api\n' +
+        "    consumes:\n      file: config/app.env\n      upsert:\n        K: v\n";
+
+    // AE5.
+    it("rejects an inherited symlink entry over a consumed file, naming the tier", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            `${CONSUMER}prime_artifacts:\n  - path: config/app.env\n    strategy: symlink\n`,
+        );
+        assert.throws(() => loadConfig(), err => {
+            const msg = (err as Error).message;
+            assert.match(msg, /Manifest-level prime_artifacts/);
+            assert.match(msg, /inherited by repo "api"/);
+            assert.match(msg, /config\/app\.env/);
+            return true;
+        });
+    });
+
+    it("rejects a symlink entry for a directory containing a consumed file", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            `${CONSUMER}    prime_artifacts:\n      - path: config\n        strategy: symlink\n`,
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: symlink entry "config".*consumes.*config\/app\.env/s,
+        );
+    });
+
+    it("accepts a symlink entry sharing a prefix without a segment boundary", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            `${CONSUMER}    prime_artifacts:\n      - path: conf\n        strategy: symlink\n`,
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.api.prime_artifacts?.[0].path, "conf");
+    });
+
+    it("accepts a copy entry for a consumed file — the guard is symlink-only", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            `${CONSUMER}    prime_artifacts:\n` +
+                "      - path: config/app.env\n        strategy: copy\n" +
+                "      - path: config\n        strategy: reflink\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.api.prime_artifacts?.length, 2);
+    });
+
+    it("rejects a symlink entry for a file the repo exposes", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\n' +
+                "    exposes:\n      port:\n        type: env_file\n" +
+                "        file: .env.local\n        key: API_PORT\n" +
+                "    prime_artifacts:\n      - path: .env.local\n        strategy: symlink\n",
+        );
+        assert.throws(
+            () => loadConfig(),
+            /Repo "api" prime_artifacts: symlink entry "\.env\.local".*exposes/s,
+        );
+    });
+
+    // A `find` entry's matches can't be enumerated before the source repo is
+    // walked, so it is deliberately left unchecked.
+    it("accepts a find-addressed symlink entry that could match a consumed path", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            `${CONSUMER}    prime_artifacts:\n      - find: config\n        strategy: symlink\n`,
+        );
+        const { config } = loadConfig();
+        assert.equal(config.repos.api.prime_artifacts?.[0].find, "config");
+    });
+
+    it("catches a collision on a non-first entry of an array-form consumes", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\n' +
+                "    consumes:\n" +
+                "      - file: first.env\n        upsert:\n          A: a\n" +
+                "      - file: config/app.env\n        upsert:\n          B: b\n" +
+                "    prime_artifacts:\n      - path: config\n        strategy: symlink\n",
+        );
+        assert.throws(
+            () => loadConfig(),
+            /symlink entry "config" covers the consumes file "config\/app\.env"/,
+        );
+    });
+
+    // R15: priming validation must not lock a user out of the commands that
+    // inspect and tear down a group they already have on disk.
+    it("still loads for inspection/teardown when only priming validation fails", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            primeYaml("      - path: cache\n        strategy: hardlink\n"),
+        );
+        assert.throws(() => loadConfig(), /unknown strategy "hardlink"/);
+        const loaded = loadConfig({ tolerateInvalidPrimeArtifacts: true });
+        assert.equal(loaded.config.repos.api.path, "/tmp/api");
+        // Callers that go on to write into a worktree read this to know the
+        // symlink collision guard is not in force.
+        assert.equal(loaded.primeArtifactsValid, false);
+    });
+
+    it("reports prime_artifacts as valid when validation passes", () => {
+        writeFileSync(join(home, "default.yaml"), primeYaml("      - path: cache\n"));
+        assert.equal(loadConfig().primeArtifactsValid, true);
+        assert.equal(
+            loadConfig({ tolerateInvalidPrimeArtifacts: true }).primeArtifactsValid,
+            true,
+        );
+    });
+
+    it("still rejects non-priming errors for inspection/teardown", () => {
+        writeFileSync(join(home, "default.yaml"), "version: 1\nrepos: {}\n");
+        assert.throws(
+            () => loadConfig({ tolerateInvalidPrimeArtifacts: true }),
+            /no repos defined/,
+        );
     });
 });

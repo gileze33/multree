@@ -1,11 +1,11 @@
-import { expandPath, loadConfig } from "../config.ts";
+import { expandPath, loadConfigForInspection } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { deleteGroupDir, loadGroup } from "../state.ts";
 import { releaseGroupVariables } from "../variables.ts";
 
 export async function destroyCommand(name: string): Promise<void> {
-    const { config, home, profile } = loadConfig();
+    const { config, home, profile } = loadConfigForInspection();
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);

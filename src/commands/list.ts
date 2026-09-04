@@ -1,5 +1,5 @@
 import { cpus } from "os";
-import { loadConfig } from "../config.ts";
+import { loadConfigForInspection } from "../config.ts";
 import { isDirtyAsync, lastCommitTimeAsync } from "../git.ts";
 import { mapPool } from "../scheduler.ts";
 import { listGroups } from "../state.ts";
@@ -28,7 +28,7 @@ function formatRelative(date: Date | null): string {
 }
 
 export async function listCommand(): Promise<void> {
-    const { config } = loadConfig();
+    const { config } = loadConfigForInspection();
     const groups = listGroups(config);
     if (groups.length === 0) {
         console.log("No active worktree groups.");

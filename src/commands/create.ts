@@ -6,7 +6,12 @@ import {
     planMainCheckoutRelease,
     type MainCheckoutReleasePlan,
 } from "../branch.ts";
-import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
+import {
+    expandPath,
+    loadConfig,
+    resolveBranchBase,
+    resolvePrimeArtifacts,
+} from "../config.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
 import { HookFailureError, HookTimeoutError, normalizeHook } from "../hooks.ts";
 import { runMemberPhase } from "../phases.ts";
@@ -321,8 +326,15 @@ function printPlan(
     console.log("");
     console.log(`Phase prime (parallel up to ${jobs}):`);
     for (const p of plans) {
-        const n = p.repoCfg.prime_artifacts?.length ?? 0;
-        console.log(`  [${p.repoName}] ${n} artifact spec(s)`);
+        const specs = resolvePrimeArtifacts(config, p.repoCfg);
+        if (specs.length === 0) {
+            console.log(`  [${p.repoName}] (none)`);
+            continue;
+        }
+        for (const spec of specs) {
+            const target = spec.path !== undefined ? `path ${spec.path}` : `find ${spec.find}`;
+            console.log(`  [${p.repoName}] ${target} (${spec.strategy ?? "copy"})`);
+        }
     }
     console.log("");
     console.log(`Phase install (parallel up to ${jobs}):`);

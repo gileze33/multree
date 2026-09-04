@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import type {
     ConsumeSpec,
     ExposeSpec,
@@ -75,6 +75,9 @@ export interface SandboxOptions {
     // the manifest verbatim, so tests can also pass invalid values (unknown
     // keys, empties, duplicates) to exercise config-load validation.
     defaultInclude?: string[];
+    // Manifest-level `prime_artifacts`. Every repo inherits these on top of its
+    // own `primeArtifacts`, so this is how a test exercises the shared tier.
+    primeArtifacts?: PrimeArtifactSpec[];
 }
 
 // Rich per-profile handle. Returned by `createMultiProfileSandbox().profile(name)`
@@ -95,6 +98,10 @@ export interface ProfileHandle {
     // True iff this profile's source repo (with `withRemote: true`) has the
     // given branch in its bare remote.
     remoteHasBranch: (key: string, branch: string) => boolean;
+    // Rewrite this profile's manifest after the sandbox is built. For tests
+    // where the manifest has to change between two commands — e.g. a shared
+    // `prime_artifacts` entry added once a group already exists.
+    updateManifest: (mutate: (cfg: MultreeConfig) => void) => void;
 }
 
 export interface Sandbox extends Omit<ProfileHandle, "name"> {
@@ -281,6 +288,7 @@ function createProfileFixture(
         parallel_setup: opts.parallelSetup,
         hook_timeout: opts.hookTimeout,
         default_include: opts.defaultInclude,
+        prime_artifacts: opts.primeArtifacts,
     };
     const manifestPath = join(home, `${name}.yaml`);
     writeFileSync(manifestPath, stringify(config));
@@ -326,6 +334,11 @@ function createProfileFixture(
         },
         gitInRepo(key: string, cmd: string) {
             return gitOut(dirFor(key), cmd);
+        },
+        updateManifest(mutate: (cfg: MultreeConfig) => void) {
+            const cfg = parse(readFileSync(manifestPath, "utf-8")) as MultreeConfig;
+            mutate(cfg);
+            writeFileSync(manifestPath, stringify(cfg));
         },
         remoteHasBranch(key: string, branch: string) {
             const spec = findSpec(key);
@@ -375,6 +388,7 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
         advanceDevelop: profile.advanceDevelop,
         gitInRepo: profile.gitInRepo,
         remoteHasBranch: profile.remoteHasBranch,
+        updateManifest: profile.updateManifest,
     };
 }
 

@@ -1,5 +1,12 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    lstatSync,
+    mkdirSync,
+    readFileSync,
+    readlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -193,6 +200,34 @@ describe("create with prime_artifacts", () => {
         assert.equal(readFileSync(copiedCache, "utf-8"), "cache-a");
     });
 
+    it("links a `symlink` artifact back at the source repo's copy", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ path: "config.local", strategy: "symlink" }],
+                },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        writeFileSync(join(repo, "config.local"), "shared\n");
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const linked = join(sb.worktreePath("g", "api"), "config.local");
+        assert.equal(lstatSync(linked).isSymbolicLink(), true);
+        assert.equal(readlinkSync(linked), join(repo, "config.local"));
+        assert.equal(readFileSync(linked, "utf-8"), "shared\n");
+
+        // The point of a link over a copy: the worktree writes through to the
+        // main checkout rather than drifting from it.
+        writeFileSync(linked, "edited\n");
+        assert.equal(readFileSync(join(repo, "config.local"), "utf-8"), "edited\n");
+    });
+
     // primeArtifacts defaults to strategy: "copy" when the field is unset.
     // Unit tests cover this on the helper directly; this pins the manifest
     // round-trip so an accidental upstream rename of the default would break.
@@ -216,5 +251,319 @@ describe("create with prime_artifacts", () => {
 
         const primed = join(sb.worktreePath("g", "api"), "out-dir", "marker");
         assert.equal(readFileSync(primed, "utf-8"), "default-strategy");
+    });
+});
+
+// The manifest-level `prime_artifacts` tier: every repo inherits these on top
+// of its own list, so a repo that declares nothing still gets primed. Priming
+// is a join-time phase, so a shared entry added later reaches only worktrees
+// created from that point on.
+describe("create with manifest-level prime_artifacts", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    // AE2.
+    it("primes a repo that declares no prime_artifacts of its own", () => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" /* no primeArtifacts */ }],
+            primeArtifacts: [
+                { path: "shared-one", strategy: "copy" },
+                { find: "shared-two", strategy: "copy" },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        mkdirSync(join(repo, "shared-one"), { recursive: true });
+        writeFileSync(join(repo, "shared-one", "marker"), "one");
+        mkdirSync(join(repo, "packages", "a", "shared-two"), { recursive: true });
+        writeFileSync(join(repo, "packages", "a", "shared-two", "marker"), "two");
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const wt = sb.worktreePath("g", "api");
+        assert.equal(readFileSync(join(wt, "shared-one", "marker"), "utf-8"), "one");
+        assert.equal(
+            readFileSync(join(wt, "packages", "a", "shared-two", "marker"), "utf-8"),
+            "two",
+        );
+    });
+
+    // AE1. The two tiers must use DIFFERENT strategies for this to be able to
+    // fail: with the same strategy on both, applying either entry produces an
+    // identical worktree and the test proves nothing.
+    it("applies a repo's own entry to a target the manifest also declares", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    // Same target as the shared entry, so only this one runs.
+                    primeArtifacts: [{ path: "shared-one", strategy: "copy" }],
+                },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+            primeArtifacts: [{ path: "shared-one", strategy: "symlink" }],
+        });
+        for (const key of ["api", "frontend"]) {
+            const repo = sb.repoPath(key);
+            mkdirSync(join(repo, "shared-one"), { recursive: true });
+            writeFileSync(join(repo, "shared-one", "marker"), key);
+        }
+
+        const r = runMultree(sb, ["create", "g", "--include", "api,frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        // api overrode the inherited symlink with its own copy...
+        const apiEntry = join(sb.worktreePath("g", "api"), "shared-one");
+        assert.equal(lstatSync(apiEntry).isSymbolicLink(), false);
+        assert.equal(readFileSync(join(apiEntry, "marker"), "utf-8"), "api");
+
+        // ...while frontend, declaring nothing, got the inherited symlink.
+        const frontendEntry = join(sb.worktreePath("g", "frontend"), "shared-one");
+        assert.equal(lstatSync(frontendEntry).isSymbolicLink(), true);
+        assert.equal(readFileSync(join(frontendEntry, "marker"), "utf-8"), "frontend");
+    });
+
+    // AE7: priming is a join-time phase, so a shared entry added after a group
+    // exists reaches the next member to join and leaves the existing ones alone.
+    it("applies a later-added shared entry only to worktrees created after it", () => {
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api" },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        for (const key of ["api", "frontend"]) {
+            const repo = sb.repoPath(key);
+            mkdirSync(join(repo, "late-shared"), { recursive: true });
+            writeFileSync(join(repo, "late-shared", "marker"), key);
+        }
+
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api"]).status, 0);
+        const apiWt = sb.worktreePath("g", "api");
+        assert.equal(existsSync(join(apiWt, "late-shared")), false);
+
+        sb.updateManifest(cfg => {
+            cfg.prime_artifacts = [{ path: "late-shared", strategy: "copy" }];
+        });
+
+        const r = runMultree(sb, ["add", "g", "frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        assert.equal(
+            readFileSync(
+                join(sb.worktreePath("g", "frontend"), "late-shared", "marker"),
+                "utf-8",
+            ),
+            "frontend",
+        );
+        // The existing member is untouched: priming does not re-run on it.
+        assert.equal(existsSync(join(apiWt, "late-shared")), false);
+    });
+});
+
+
+// R15: a priming-validation failure has to break the commands that would act on
+// it (create, add) without locking the user out of the ones that inspect and
+// tear down a group they already have on disk.
+describe("prime_artifacts validation", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    it("never wires through a symlink when the collision guard was tolerated", () => {
+        // The guard exists to stop multree writing its managed block through a
+        // primed symlink into the repo's MAIN CHECKOUT. remove tolerates an
+        // invalid manifest so teardown still works, so it must not also wire.
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ path: ".env.local", strategy: "symlink" }],
+                },
+                { key: "frontend", dirname: "fake-frontend" },
+            ],
+        });
+        const apiRepo = sb.repoPath("api");
+        writeFileSync(join(apiRepo, ".env.local"), "MAIN=original\n");
+
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api,frontend"]).status, 0);
+        assert.equal(lstatSync(join(sb.worktreePath("g", "api"), ".env.local")).isSymbolicLink(), true);
+
+        // The operator now adds a consumes entry over the already-linked file.
+        sb.updateManifest(cfg => {
+            cfg.repos.api.consumes = { file: ".env.local", upsert: { INJECTED: "yes" } };
+        });
+
+        // create and rewire refuse outright.
+        assert.notEqual(runMultree(sb, ["create", "g2", "--include", "api"]).status, 0);
+        assert.notEqual(runMultree(sb, ["rewire", "g"]).status, 0);
+
+        const r = runMultree(sb, ["remove", "g", "frontend"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stderr, /Skipping re-wire/);
+
+        // The main checkout is untouched, and the removal still persisted.
+        assert.equal(readFileSync(join(apiRepo, ".env.local"), "utf-8"), "MAIN=original\n");
+        assert.deepEqual(Object.keys(sb.state("g")!.members), ["api"]);
+    });
+
+    it("blocks create but still allows show and destroy", () => {
+        sb = createSandbox({ repos: [{ key: "api", dirname: "fake-api" }] });
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api"]).status, 0);
+
+        sb.updateManifest(cfg => {
+            cfg.prime_artifacts = [
+                { path: "cache", strategy: "hardlink" as never },
+            ];
+        });
+
+        const created = runMultree(sb, ["create", "g2", "--include", "api"]);
+        assert.notEqual(created.status, 0);
+        assert.match(created.stderr, /unknown strategy "hardlink"/);
+
+        const shown = runMultree(sb, ["show", "g"]);
+        assert.equal(shown.status, 0, shown.stderr);
+        assert.match(shown.stdout, /Group: g/);
+        assert.match(shown.stderr, /unknown strategy "hardlink"/);
+
+        // Every command that neither primes nor writes a member's env file
+        // stays reachable, not just the two above.
+        // `push` is omitted only because this sandbox's repos have no remote,
+        // not because it is excluded from the tolerant set.
+        for (const args of [["list"], ["status", "g"], ["update", "g"]]) {
+            const r = runMultree(sb, args);
+            assert.equal(r.status, 0, `${args.join(" ")} failed:\n${r.stderr}`);
+        }
+
+        const destroyed = runMultree(sb, ["destroy", "g"]);
+        assert.equal(destroyed.status, 0, destroyed.stderr);
+        assert.equal(existsSync(join(sb.worktreeRoot, "g")), false);
+    });
+});
+
+// R11/R12/R13: priming has to say what it did and what it skipped, attributed
+// to the repo it did it for, in the default output — a user should be able to
+// tell where each link points without opening the worktree.
+describe("create prime output", () => {
+    let sb: Sandbox;
+
+    afterEach(() => sb.cleanup());
+
+    // AE6 + a repo prefix on every priming line.
+    it("prints each created link's path and target under its repo's prefix", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [
+                        { path: "config.local", strategy: "symlink" },
+                        { path: "cache", strategy: "copy" },
+                    ],
+                },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        writeFileSync(join(repo, "config.local"), "shared\n");
+        mkdirSync(join(repo, "cache"), { recursive: true });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        assert.match(
+            r.stdout,
+            new RegExp(`\\[api\\]\\s+config\\.local \\.\\.\\. linked -> ${join(repo, "config.local")}`),
+        );
+        // Every priming line carries the prefix, not just the phase banner.
+        const primeLines = r.stdout
+            .split("\n")
+            .filter(line => /priming|linked|skipped|prime complete/.test(line));
+        assert.ok(primeLines.length > 0, "no priming lines in output");
+        for (const line of primeLines) {
+            assert.match(line, /^\[api\]/, `unprefixed priming line: ${line}`);
+        }
+    });
+
+    // AE8.
+    it("reports an entry skipped for a missing source, and still exits zero", () => {
+        sb = createSandbox({
+            repos: [{ key: "api", dirname: "fake-api" }],
+            primeArtifacts: [{ path: "never-here", strategy: "symlink" }],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped never-here \(not in /);
+    });
+
+    it("reports an occupied destination with its own distinct reason", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    // Committed, so the worktree already holds it.
+                    files: { "config.local": "tracked\n" },
+                    primeArtifacts: [{ path: "config.local", strategy: "symlink" }],
+                },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped config\.local \(destination already exists\)/);
+        assert.doesNotMatch(r.stdout, /skipped config\.local \(not in /);
+    });
+
+    it("reports a find entry that matched nothing, naming the search value", () => {
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ find: "build-cache", strategy: "copy" }],
+                },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\]\s+skipped find "build-cache" \(no match in /);
+    });
+
+    // AE10.
+    it("lists a repo's inherited entries with targets and strategies in the dry run", () => {
+        sb = createSandbox({
+            repos: [
+                { key: "api", dirname: "fake-api" },
+                {
+                    key: "frontend",
+                    dirname: "fake-frontend",
+                    primeArtifacts: [{ path: "own-cache", strategy: "copy" }],
+                },
+            ],
+            primeArtifacts: [
+                { path: "config.local", strategy: "symlink" },
+                { find: "node_modules", strategy: "reflink" },
+            ],
+        });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api,frontend", "--plan"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /\[api\] path config\.local \(symlink\)/);
+        assert.match(r.stdout, /\[api\] find node_modules \(reflink\)/);
+        assert.match(r.stdout, /\[frontend\] path own-cache \(copy\)/);
+        assert.doesNotMatch(r.stdout, /artifact spec\(s\)/);
+    });
+
+    it("reports none in the dry run for a repo with no entries at all", () => {
+        sb = createSandbox({ repos: [{ key: "api", dirname: "fake-api" }] });
+
+        const r = runMultree(sb, ["create", "g", "--include", "api", "--plan"]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /Phase prime[^\n]*\n\s+\[api\] \(none\)/);
     });
 });

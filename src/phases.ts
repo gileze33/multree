@@ -4,6 +4,7 @@
 // drifting (new phase, new ordering, new logging).
 
 import { primeArtifacts } from "./artifacts.ts";
+import { resolvePrimeArtifacts } from "./config.ts";
 import { normalizeHook, runMemberHook } from "./hooks.ts";
 import type { MemberState, MultreeConfig, PhaseName, RepoConfig } from "./types.ts";
 import { readExposes } from "./wiring.ts";
@@ -25,9 +26,10 @@ export async function runMemberPhase(
 ): Promise<void> {
     const { repoName, groupName, repoCfg, repoPath, worktreePath } = ctx;
     if (phase === "prime") {
-        if (repoCfg.prime_artifacts && repoCfg.prime_artifacts.length > 0) {
+        const specs = resolvePrimeArtifacts(config, repoCfg);
+        if (specs.length > 0) {
             console.log(`[${repoName}] priming artifacts`);
-            primeArtifacts(repoPath, worktreePath, repoCfg.prime_artifacts);
+            primeArtifacts(repoName, repoPath, worktreePath, specs);
         }
         return;
     }
