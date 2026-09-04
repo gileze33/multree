@@ -1,5 +1,12 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    lstatSync,
+    mkdirSync,
+    readFileSync,
+    readlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
@@ -191,6 +198,34 @@ describe("create with prime_artifacts", () => {
 
         const copiedCache = join(wt, "packages", "a", "build-cache", "marker");
         assert.equal(readFileSync(copiedCache, "utf-8"), "cache-a");
+    });
+
+    it("links a `symlink` artifact back at the source repo's copy", () => {
+        sb.cleanup();
+        sb = createSandbox({
+            repos: [
+                {
+                    key: "api",
+                    dirname: "fake-api",
+                    primeArtifacts: [{ path: "config.local", strategy: "symlink" }],
+                },
+            ],
+        });
+        const repo = sb.repoPath("api");
+        writeFileSync(join(repo, "config.local"), "shared\n");
+
+        const r = runMultree(sb, ["create", "g", "--include", "api"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const linked = join(sb.worktreePath("g", "api"), "config.local");
+        assert.equal(lstatSync(linked).isSymbolicLink(), true);
+        assert.equal(readlinkSync(linked), join(repo, "config.local"));
+        assert.equal(readFileSync(linked, "utf-8"), "shared\n");
+
+        // The point of a link over a copy: the worktree writes through to the
+        // main checkout rather than drifting from it.
+        writeFileSync(linked, "edited\n");
+        assert.equal(readFileSync(join(repo, "config.local"), "utf-8"), "edited\n");
     });
 
     // primeArtifacts defaults to strategy: "copy" when the field is unset.

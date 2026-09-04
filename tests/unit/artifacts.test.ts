@@ -1,5 +1,15 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    lstatSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    readlinkSync,
+    rmSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -49,6 +59,12 @@ describe("primeArtifacts (copy strategy)", () => {
         assert.equal(readFileSync(join(dst, "packages", "b", "node_modules", "marker"), "utf-8"), "b");
     });
 
+    // `copy` and `reflink` keep a plain existence check; only `symlink` gained
+    // an lstat-based one (KTD3). A DANGLING link at the destination therefore
+    // still reads as absent to these two, and the cpSync that follows aborts
+    // the process with an uncatchable native exception. That predates this
+    // change and is left alone deliberately — it has no test because
+    // exercising it kills the test runner.
     it("skips destinations that already exist", () => {
         mkdirSync(join(src, "node_modules"), { recursive: true });
         writeFileSync(join(src, "node_modules", "marker"), "from-src");
@@ -115,6 +131,119 @@ describe("primeArtifacts (copy strategy)", () => {
         writeFileSync(join(src, weird, "marker"), "ok");
         primeArtifacts(src, dst, [{ path: weird, strategy: "copy" }]);
         assert.equal(readFileSync(join(dst, weird, "marker"), "utf-8"), "ok");
+    });
+});
+
+// `symlink` points the worktree path at the corresponding path in the repo's
+// main checkout, so reads and writes through it resolve there rather than
+// duplicating the tree.
+describe("primeArtifacts (symlink strategy)", () => {
+    let root: string;
+    let src: string;
+    let dst: string;
+
+    beforeEach(() => {
+        root = mkdtempSync(join(tmpdir(), "multree-symlink-"));
+        src = join(root, "src");
+        dst = join(root, "dst");
+        mkdirSync(src, { recursive: true });
+        mkdirSync(dst, { recursive: true });
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it("links the worktree path at its counterpart in the main checkout", () => {
+        writeFileSync(join(src, "config.local"), "shared\n");
+
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+
+        const link = join(dst, "config.local");
+        assert.equal(lstatSync(link).isSymbolicLink(), true);
+        assert.equal(readlinkSync(link), join(src, "config.local"));
+        assert.equal(readFileSync(link, "utf-8"), "shared\n");
+    });
+
+    it("makes a write through the link visible in the main checkout", () => {
+        writeFileSync(join(src, "config.local"), "before\n");
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+
+        writeFileSync(join(dst, "config.local"), "after\n");
+
+        assert.equal(readFileSync(join(src, "config.local"), "utf-8"), "after\n");
+    });
+
+    // AE3.
+    it("skips a source the main checkout does not have, without erroring", () => {
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        assert.equal(existsSync(join(dst, "config.local")), false);
+    });
+
+    it("leaves a destination already holding a regular file untouched", () => {
+        writeFileSync(join(src, "config.local"), "from-src\n");
+        writeFileSync(join(dst, "config.local"), "from-dst\n");
+
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+
+        assert.equal(lstatSync(join(dst, "config.local")).isSymbolicLink(), false);
+        assert.equal(readFileSync(join(dst, "config.local"), "utf-8"), "from-dst\n");
+    });
+
+    // AE4: a dangling link reads as absent to a plain existence check, so
+    // re-priming would try to create over it and throw. Occupancy for symlink
+    // is lstat-based instead.
+    it("leaves a dangling destination link in place and raises no error", () => {
+        writeFileSync(join(src, "config.local"), "shared\n");
+        symlinkSync(join(root, "gone"), join(dst, "config.local"));
+
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+
+        assert.equal(readlinkSync(join(dst, "config.local")), join(root, "gone"));
+    });
+
+    it("re-priming an already-linked worktree changes nothing", () => {
+        writeFileSync(join(src, "config.local"), "shared\n");
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+        primeArtifacts(src, dst, [{ path: "config.local", strategy: "symlink" }]);
+
+        assert.equal(readlinkSync(join(dst, "config.local")), join(src, "config.local"));
+    });
+
+    it("creates missing parent directories for a nested destination", () => {
+        mkdirSync(join(src, "deep", "nested"), { recursive: true });
+        writeFileSync(join(src, "deep", "nested", "config.local"), "shared\n");
+
+        primeArtifacts(src, dst, [
+            { path: "deep/nested/config.local", strategy: "symlink" },
+        ]);
+
+        assert.equal(
+            readlinkSync(join(dst, "deep", "nested", "config.local")),
+            join(src, "deep", "nested", "config.local"),
+        );
+    });
+
+    it("links every directory a 'find' entry matches", () => {
+        mkdirSync(join(src, "packages", "a", "shared"), { recursive: true });
+        mkdirSync(join(src, "packages", "b", "shared"), { recursive: true });
+        writeFileSync(join(src, "packages", "a", "shared", "marker"), "a");
+        writeFileSync(join(src, "packages", "b", "shared", "marker"), "b");
+
+        primeArtifacts(src, dst, [{ find: "shared", strategy: "symlink" }]);
+
+        for (const pkg of ["a", "b"]) {
+            const link = join(dst, "packages", pkg, "shared");
+            assert.equal(lstatSync(link).isSymbolicLink(), true);
+            assert.equal(readFileSync(join(link, "marker"), "utf-8"), pkg);
+        }
+    });
+
+    it("links a directory so its contents resolve through the link", () => {
+        mkdirSync(join(src, "shared"), { recursive: true });
+        writeFileSync(join(src, "shared", "marker"), "x");
+
+        primeArtifacts(src, dst, [{ path: "shared", strategy: "symlink" }]);
+
+        writeFileSync(join(dst, "shared", "added"), "y");
+        assert.equal(readFileSync(join(src, "shared", "added"), "utf-8"), "y");
     });
 });
 

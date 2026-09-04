@@ -1,6 +1,6 @@
-import { cpSync, existsSync } from "fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, symlinkSync } from "fs";
 import { execFileSync } from "child_process";
-import { join } from "path";
+import { dirname, join } from "path";
 import type { PrimeArtifactSpec, PrimeStrategy } from "./types.ts";
 
 // macOS clonefile(2) on a directory recursively clones the whole tree in a
@@ -47,7 +47,38 @@ function resolveSources(repoPath: string, spec: PrimeArtifactSpec): string[] {
     throw new Error("prime_artifacts: must specify 'path' or 'find'");
 }
 
+// Whether the destination is already taken, per strategy.
+//
+// `symlink` needs an lstat: a link whose own target has gone missing reads as
+// absent to a plain existence check, so re-priming would try to create over it
+// — and the creation that follows aborts rather than failing cleanly. `copy`
+// and `reflink` keep the existence check they have always used; widening it
+// would change behaviour for manifests already in use (KTD3).
+function destinationOccupied(dst: string, strategy: PrimeStrategy): boolean {
+    if (strategy !== "symlink") {
+        return existsSync(dst);
+    }
+    try {
+        lstatSync(dst);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function primeOne(src: string, dst: string, strategy: PrimeStrategy): boolean {
+    if (strategy === "symlink") {
+        try {
+            mkdirSync(dirname(dst), { recursive: true });
+            // Absolute target: the repo path multree already resolved. Nothing
+            // here goes through the manifest's ~ / ${VAR} expansion, and links
+            // inherit that.
+            symlinkSync(src, dst);
+            return true;
+        } catch {
+            return false;
+        }
+    }
     if (strategy === "reflink") {
         if (process.platform === "darwin") {
             if (clonefileDir(src, dst)) {
@@ -107,7 +138,7 @@ export function primeArtifacts(
             if (!existsSync(src)) {
                 continue;
             }
-            if (existsSync(dst)) {
+            if (destinationOccupied(dst, strategy)) {
                 continue;
             }
 
