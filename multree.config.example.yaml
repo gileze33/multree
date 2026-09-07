@@ -63,6 +63,33 @@ tools:
     #     command: claude
     #     open_in: [api, $root]
 
+# Optional cmux integration (https://cmux.com). When this block is present AND
+# multree is running inside cmux, `multree create` opens a cmux workspace laid
+# out as Claude on the left and, on the right, one pane per included repo: a
+# "service" pane for each repo that declares a `run` command target, or a plain
+# shell in the repo's worktree otherwise. On-demand equivalents:
+# `multree cmux up|down|status <group>` (and `--cmux` / `--no-cmux` on create).
+# Remove this block entirely to make multree never touch cmux.
+# cmux:
+#     # When create opens a workspace. Unset (default): on when this block is
+#     # present and we're inside cmux. true/false force it on/off regardless;
+#     # --cmux / --no-cmux on create override per invocation.
+#     auto: true
+#     # Width fraction (0..1) of the left Claude pane; the stack takes the rest.
+#     split: 0.5
+#     # Left-pane command. Defaults to the `claude` tool's command, else "claude".
+#     claude: claude
+#     # Which cmux sidebar group to open into. Unset or "current": the group the
+#     # multree command was run from (ungrouped if the caller isn't in one).
+#     # "none": always ungrouped. Any other value: upsert a group of that name.
+#     # Override per run with --group <name|current> / --no-group.
+#     group: current
+#     # Per-repo pane override. Default: "service" if the repo has `run` targets,
+#     # else "shell". Use a list for both, or "skip" to omit the repo.
+#     panes:
+#         api: [service, shell]   # run the dev server AND open a worktree shell
+#         frontend: shell         # just a shell, even though it has a run target
+
 repos:
     # Pick any short, stable key. Used on the CLI: `--include api,frontend`.
     api:
