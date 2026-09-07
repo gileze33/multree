@@ -44,6 +44,7 @@ export const SUBCOMMANDS = [
     "destroy",
     "profile",
     "shell",
+    "cmux",
     "completion",
     "help",
 ] as const;
@@ -66,6 +67,10 @@ const COMMAND_FLAGS: Record<string, Record<string, FlagSpec>> = {
         "--plan": {},
         "--resume": {},
         "--verbose": {},
+        "--cmux": {},
+        "--no-cmux": {},
+        "--group": { value: "free" },
+        "--no-group": {},
     },
     add: { "--verbose": {} },
     status: { "--fetch": {} },
@@ -74,6 +79,12 @@ const COMMAND_FLAGS: Record<string, Record<string, FlagSpec>> = {
         "--include": { value: "members" },
         "--set-upstream": {},
         "--force": {},
+    },
+    cmux: {
+        "--print": {},
+        "--focus": {},
+        "--group": { value: "free" },
+        "--no-group": {},
     },
 };
 
@@ -211,6 +222,16 @@ function completePositional(
     }
     if (subcommand === "completion") {
         return positionals.length === 0 ? filterByPrefix(["bash", "zsh"], cur) : [];
+    }
+    if (subcommand === "cmux") {
+        // `multree cmux <up|down|status> <group>`: the action first, then a group.
+        if (positionals.length === 0) {
+            return filterByPrefix(["up", "down", "status"], cur);
+        }
+        if (positionals.length === 1) {
+            return filterByPrefix(groupNames(ctx), cur);
+        }
+        return [];
     }
     if (isAction) {
         // `multree <action> <group> <target>`: group first, then a target that

@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { actionCommand, collectActionVerbs } from "./actions.ts";
 import { addCommand } from "./commands/add.ts";
+import { cmuxCommand } from "./commands/cmux.ts";
 import { completeCommand, completionCommand } from "./commands/completion.ts";
 import { createCommand } from "./commands/create.ts";
 import { destroyCommand } from "./commands/destroy.ts";
@@ -126,6 +127,7 @@ Usage:
   multree destroy <name>
   multree profile [list|path|alias|unalias]
   multree shell <name> [<repo>]
+  multree cmux <up|down|status> <name> [--print] [--focus]
   multree completion <bash|zsh>
 ${toolsLine}
 Manifest: <$MULTREE_HOME or ~/.multree>/<profile>.yaml. Profile resolution:
@@ -225,6 +227,17 @@ async function main(): Promise<void> {
                 const from = typeof flags.from === "string" ? flags.from : undefined;
                 const branchesByRepo = collectFromOverrides(flags);
                 const jobs = typeof flags.jobs === "string" ? parseJobs(flags.jobs) : undefined;
+                // --cmux forces the workspace open, --no-cmux forces it off;
+                // absent leaves it to cmux.auto / the inside-cmux default.
+                const cmux = flags.cmux === true ? true : flags["no-cmux"] === true ? false : undefined;
+                // --group <name|current> / --no-group override cmux sidebar
+                // placement; absent falls back to cmux.group (current group).
+                if (flags.group === true) {
+                    throw new Error("--group requires a value (a group name, or 'current')");
+                }
+                const group = flags["no-group"] === true
+                    ? "none"
+                    : typeof flags.group === "string" ? flags.group : undefined;
                 await createCommand({
                     name,
                     include,
@@ -235,6 +248,8 @@ async function main(): Promise<void> {
                     plan: flags.plan === true,
                     resume: flags.resume === true,
                     verbose: flags.verbose === true,
+                    cmux,
+                    group,
                 });
                 break;
             }
@@ -301,6 +316,9 @@ async function main(): Promise<void> {
                 shellCommand(name, positional[1]);
                 break;
             }
+            case "cmux":
+                cmuxCommand(positional, flags);
+                break;
             case "help":
             case "--help":
             case "-h":

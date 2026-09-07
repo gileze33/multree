@@ -178,6 +178,62 @@ function validate(cfg: MultreeConfig): void {
     }
     validateDependsOn(cfg);
     validateDefaultInclude(cfg);
+    validateCmux(cfg);
+}
+
+const CMUX_PANE_KINDS = new Set(["service", "shell", "skip"]);
+
+function validateCmux(cfg: MultreeConfig): void {
+    const c = cfg.cmux;
+    if (c === undefined) {
+        return;
+    }
+    if (c.auto !== undefined && typeof c.auto !== "boolean") {
+        throw new Error("cmux.auto must be a boolean");
+    }
+    if (c.split !== undefined) {
+        if (typeof c.split !== "number" || !Number.isFinite(c.split) || c.split <= 0 || c.split >= 1) {
+            throw new Error("cmux.split must be a number strictly between 0 and 1");
+        }
+    }
+    if (c.claude !== undefined) {
+        const ok =
+            typeof c.claude === "string"
+                ? c.claude.trim() !== ""
+                : Array.isArray(c.claude) &&
+                  c.claude.length > 0 &&
+                  c.claude.every(item => typeof item === "string");
+        if (!ok) {
+            throw new Error("cmux.claude must be a non-empty string or argv array of strings");
+        }
+    }
+    if (c.group !== undefined && (typeof c.group !== "string" || c.group.trim() === "")) {
+        throw new Error('cmux.group must be a non-empty string (a group name, or "current"/"none")');
+    }
+    if (c.panes !== undefined) {
+        if (typeof c.panes !== "object" || c.panes === null || Array.isArray(c.panes)) {
+            throw new Error("cmux.panes must be a map of repo key -> pane kind(s)");
+        }
+        for (const [repoKey, spec] of Object.entries(c.panes)) {
+            if (!cfg.repos[repoKey]) {
+                throw new Error(
+                    `cmux.panes references unknown repo "${repoKey}". ` +
+                        `Available: ${Object.keys(cfg.repos).join(", ")}`,
+                );
+            }
+            const kinds = Array.isArray(spec) ? spec : [spec];
+            if (kinds.length === 0) {
+                throw new Error(`cmux.panes.${repoKey} must not be an empty list`);
+            }
+            for (const kind of kinds) {
+                if (!CMUX_PANE_KINDS.has(kind)) {
+                    throw new Error(
+                        `cmux.panes.${repoKey}: invalid kind "${kind}" (service|shell|skip)`,
+                    );
+                }
+            }
+        }
+    }
 }
 
 // Target and action names share the wiring/group-name character class so they

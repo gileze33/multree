@@ -1,3 +1,4 @@
+import { teardownCmuxWorkspace } from "../cmux.ts";
 import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
@@ -9,6 +10,12 @@ export async function destroyCommand(name: string): Promise<void> {
     const group = loadGroup(config, name);
     if (!group) {
         throw new Error(`Group not found: ${name}`);
+    }
+
+    // Close the cmux workspace first so running dev servers (holding ports and
+    // worktree file handles) are killed before the worktrees are removed.
+    if (teardownCmuxWorkspace(config, group)) {
+        console.log("[cmux] closed workspace");
     }
 
     for (const [repoName, member] of Object.entries(group.members)) {
