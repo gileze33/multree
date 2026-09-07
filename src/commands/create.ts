@@ -6,6 +6,7 @@ import {
     planMainCheckoutRelease,
     type MainCheckoutReleasePlan,
 } from "../branch.ts";
+import { ensureCmuxWorkspace, formatOpenResult, shouldOpenCmux } from "../cmux.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
 import { HookFailureError, HookTimeoutError, normalizeHook } from "../hooks.ts";
@@ -33,6 +34,14 @@ interface CreateArgs {
     plan?: boolean;
     resume?: boolean;
     verbose?: boolean;
+    // `--cmux` / `--no-cmux` override. Undefined = fall back to the manifest's
+    // cmux.auto, then to the default (open when a cmux block exists and we're
+    // running inside cmux).
+    cmux?: boolean;
+    // `--group <name|current>` / `--no-group` override for cmux sidebar
+    // placement. Undefined = fall back to the manifest's cmux.group (default:
+    // the caller's current group). "none" = ungrouped.
+    group?: string;
 }
 
 // CreateArgs after the repo selection has been resolved, so downstream helpers
@@ -201,6 +210,17 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         }
         for (const [k, v] of Object.entries(member.exposes)) {
             console.log(`    exposed ${k}=${v}`);
+        }
+    }
+
+    if (shouldOpenCmux(config, args.cmux)) {
+        const result = ensureCmuxWorkspace(config, group, false, args.group);
+        const { text, warn } = formatOpenResult(result, args.name);
+        console.log("");
+        if (warn) {
+            console.warn(text);
+        } else {
+            console.log(`✓ ${text}`);
         }
     }
 }

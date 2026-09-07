@@ -133,11 +133,43 @@ export interface TargetSpec {
     [action: string]: ActionSpec | undefined;
 }
 
+// A pane kind in the cmux workspace layout. "service" runs each of a repo's
+// `run` command targets in its own pane; "shell" opens a plain shell in the
+// repo's worktree; "skip" gives the repo no pane.
+export type CmuxPaneKind = "service" | "shell" | "skip";
+
+export interface CmuxConfig {
+    // When `multree create` opens a cmux workspace. Unset (default): open when a
+    // `cmux` block is present AND multree is running inside cmux. `true`/`false`
+    // force it on/off regardless. The `--cmux` / `--no-cmux` flags on `create`
+    // override this per invocation.
+    auto?: boolean;
+    // Width fraction (strictly between 0 and 1) the left Claude pane gets; the
+    // service/shell stack on the right takes the remainder. Default 0.5.
+    split?: number;
+    // Command for the left pane. Shell string or argv array. Defaults to the
+    // `claude` tool's command if one is defined, else "claude".
+    claude?: string | string[];
+    // Which cmux sidebar group to open the workspace into. Unset or "current":
+    // the group the `multree` command was run from (ungrouped if the caller is
+    // not in one). "none": always ungrouped. Any other value: upsert a group of
+    // that name and open within it. `--group <name|current>` / `--no-group`
+    // override per invocation.
+    group?: string;
+    // Per-repo pane override, keyed by repo key. A single kind or a list (e.g.
+    // ["service", "shell"] for a dev server plus a worktree shell). Default per
+    // repo: "service" if it declares `run` targets, else "shell".
+    panes?: Record<string, CmuxPaneKind | CmuxPaneKind[]>;
+}
+
 export interface MultreeConfig {
     version: 1;
     worktree_root?: string;
     repos: Record<string, RepoConfig>;
     tools?: Record<string, ToolConfig>;
+    // Optional cmux integration. Its presence (inside cmux) is the opt-in; see
+    // CmuxConfig. Absent = multree never touches cmux.
+    cmux?: CmuxConfig;
     // Manifest-level default for `multree update`. Per-repo `update_strategy`
     // overrides this. If neither is set, "rebase" wins.
     update_strategy?: UpdateStrategy;
@@ -187,4 +219,8 @@ export interface GroupState {
     branch: string;
     created_at: string;
     members: Record<string, MemberState>;
+    // The cmux workspace opened for this group, if any. Stored as a stable
+    // workspace UUID so teardown works from a later session. Set by `create`
+    // (when cmux is enabled) or `multree cmux up`; cleared by `multree cmux down`.
+    cmux?: { workspace_id: string };
 }
