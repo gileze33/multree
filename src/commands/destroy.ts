@@ -1,4 +1,4 @@
-import { teardownCmuxWorkspace } from "../cmux.ts";
+import { closeWorkspace, cmuxReachable } from "../cmux.ts";
 import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
@@ -12,11 +12,9 @@ export async function destroyCommand(name: string): Promise<void> {
         throw new Error(`Group not found: ${name}`);
     }
 
-    // Close the cmux workspace first so running dev servers (holding ports and
-    // worktree file handles) are killed before the worktrees are removed.
-    if (teardownCmuxWorkspace(config, group)) {
-        console.log("[cmux] closed workspace");
-    }
+    // Capture the cmux workspace id up front; closing the workspace is deferred
+    // to the very end (see below), after which group state no longer exists.
+    const cmuxWorkspaceId = group.cmux?.workspace_id;
 
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
@@ -48,4 +46,15 @@ export async function destroyCommand(name: string): Promise<void> {
     releaseGroupVariables(home, profile, name);
     console.log(`\n✓ Group "${name}" destroyed`);
     console.log(`  (branch "${group.branch}" left in place; delete manually if no longer needed)`);
+
+    // Close the cmux workspace last. Destroy is often run from a shell inside
+    // the group's own workspace, and closing it kills that shell (and this
+    // process), so everything that must complete (teardown hooks that purge
+    // DBs, worktree removal, state and variable cleanup) has to run first.
+    // Call closeWorkspace directly rather than teardownCmuxWorkspace: the group
+    // dir is already gone, and teardown's trailing saveGroup would recreate it.
+    if (cmuxWorkspaceId && cmuxReachable()) {
+        console.log("[cmux] closing workspace");
+        closeWorkspace(cmuxWorkspaceId);
+    }
 }
