@@ -1,9 +1,33 @@
 import { strict as assert } from "node:assert";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
 import { createSandbox, trace, type Sandbox } from "../helpers/sandbox.ts";
+
+// Drop a fake `cmux` on PATH whose `ping` succeeds (so cmuxReachable() is true)
+// and whose `close-workspace` appends to the trace log. Lets us observe when
+// destroy closes the workspace relative to the teardown hooks, without a live
+// cmux app. Returns an env with the fake dir prepended to PATH.
+function withFakeCmux(sb: Sandbox): NodeJS.ProcessEnv {
+    const binDir = join(sb.root, "fake-bin");
+    mkdirSync(binDir, { recursive: true });
+    const script = join(binDir, "cmux");
+    writeFileSync(
+        script,
+        [
+            "#!/bin/sh",
+            "case \"$1\" in",
+            "  ping) exit 0 ;;",
+            "  close-workspace) echo 'cmux:close-workspace' >> \"$MULTREE_TEST_LOG\"; exit 0 ;;",
+            "  *) exit 0 ;;",
+            "esac",
+            "",
+        ].join("\n"),
+    );
+    chmodSync(script, 0o755);
+    return { ...sb.env, PATH: `${binDir}:${sb.env.PATH}` };
+}
 
 describe("destroy edge cases", () => {
     let sb: Sandbox;
@@ -53,6 +77,34 @@ describe("destroy edge cases", () => {
 
         const events = sb.trace();
         assert.ok(events.includes("frontend:teardown"));
+    });
+
+    // Regression: destroy used to close the cmux workspace first. Run from a
+    // shell inside the group's own workspace, that killed the destroy process
+    // before the teardown hooks (which purge databases) had run. The close must
+    // happen last, after every hook and worktree removal.
+    it("closes the cmux workspace only after teardown hooks have run", () => {
+        assert.equal(runMultree(sb, ["create", "g", "--include", "api,frontend", "--no-cmux"]).status, 0);
+
+        // Record a workspace id as if create had opened one.
+        const statePath = join(sb.worktreeRoot, "g", ".multree.json");
+        const state = JSON.parse(readFileSync(statePath, "utf-8"));
+        state.cmux = { workspace_id: "ws-abc" };
+        writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+        const r = runMultree({ env: withFakeCmux(sb) }, ["destroy", "g"]);
+        assert.equal(r.status, 0, r.stderr);
+
+        const events = sb.trace();
+        const close = events.indexOf("cmux:close-workspace");
+        assert.notEqual(close, -1, "cmux workspace should have been closed");
+        assert.ok(events.includes("api:teardown"), "api teardown should have run");
+        assert.ok(events.includes("frontend:teardown"), "frontend teardown should have run");
+        assert.ok(
+            events.indexOf("api:teardown") < close && events.indexOf("frontend:teardown") < close,
+            `teardown hooks must run before the cmux close: ${events.join(", ")}`,
+        );
+        assert.equal(sb.state("g"), null, "group should be gone");
     });
 
     it("destroy on a non-existent group errors with a clear message", () => {
