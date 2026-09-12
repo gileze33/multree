@@ -91,7 +91,7 @@ describe("add and remove", () => {
         runMultree(sb, ["create", "g", "--include", "api"]);
         const r = runMultree(sb, ["add", "g", "phantom"]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /Unknown repo "phantom"/);
+        assert.match(r.stderr, /Unknown repo or app "phantom"/);
     });
 
     it("errors when the group does not exist (add)", () => {

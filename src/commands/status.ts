@@ -33,7 +33,19 @@ export function statusCommand(args: StatusArgs): void {
 
     for (const [repoName, member] of Object.entries(group.members)) {
         const repoCfg = config.repos[repoName];
+        const appCfg = config.apps?.[repoName];
         console.log("");
+
+        // Apps have no git worktree — show their wiring, skip branch/tree status.
+        if (appCfg && !repoCfg) {
+            console.log(`▸ ${repoName} (app)`);
+            console.log(`    path: ${member.path}`);
+            for (const [k, v] of Object.entries(member.variables ?? {})) {
+                console.log(`    variables.${k} = ${v}`);
+            }
+            continue;
+        }
+
         console.log(`▸ ${repoName}`);
         console.log(`    path: ${member.path}`);
 

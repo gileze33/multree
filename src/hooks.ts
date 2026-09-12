@@ -1,8 +1,12 @@
 import { spawn } from "child_process";
 import { formatDuration, parseDuration } from "./duration.ts";
-import type { HookCmd, HookSpec, MultreeConfig, RepoConfig } from "./types.ts";
+import type { HookCmd, HookSpec, MultreeConfig } from "./types.ts";
 
 export type MemberHookPhase = "install" | "setup" | "teardown";
+
+// The slice of a member config that hook-timeout resolution needs. Both a
+// RepoConfig and an AppConfig satisfy it, so app hooks reuse this path.
+type HookTimeoutSource = { hooks?: { timeout?: string | number } };
 
 export function normalizeHook(spec: HookSpec | undefined): HookCmd | undefined {
     if (spec === undefined) {
@@ -153,7 +157,7 @@ export interface MemberHookArgs {
     hook: HookCmd;
     repoPath: string;
     worktreePath: string;
-    repoCfg: RepoConfig;
+    repoCfg: HookTimeoutSource;
     config: MultreeConfig;
     // Only consulted for install/setup; teardown always streams live so the
     // user can see what's happening as a worktree comes down.
@@ -208,7 +212,7 @@ export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult
 // per-hook -> per-repo -> manifest-level. Returns undefined if none set.
 export function resolveHookTimeout(
     hook: HookCmd,
-    repoCfg: RepoConfig,
+    repoCfg: HookTimeoutSource,
     config: MultreeConfig,
 ): number | undefined {
     const candidates: Array<string | number | undefined> = [

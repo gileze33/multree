@@ -1,11 +1,11 @@
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { basename, join } from "path";
 import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
 import { runMemberPhase } from "../phases.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
-import type { PhaseName } from "../types.ts";
+import type { MemberState, PhaseName } from "../types.ts";
 import { assignGroupVariables } from "../variables.ts";
 import { wireGroup } from "../wiring.ts";
 
@@ -17,7 +17,7 @@ const PHASES: PhaseName[] = ["prime", "install", "setup"];
 
 export async function addCommand(
     groupName: string,
-    repoName: string,
+    memberName: string,
     opts: AddOptions = {},
 ): Promise<void> {
     const { config, home, profile } = loadConfig();
@@ -25,15 +25,39 @@ export async function addCommand(
     if (!group) {
         throw new Error(`Group not found: ${groupName}`);
     }
+    if (group.members[memberName]) {
+        throw new Error(`Member "${memberName}" is already in group "${groupName}"`);
+    }
 
-    const repoCfg = config.repos[repoName];
+    // Apps: a scratchpad dir plus an optional setup hook — no worktree, prime, or
+    // install. Everything else (variables, wiring, .mcp.json) is the shared path.
+    const appCfg = config.apps?.[memberName];
+    if (appCfg && !config.repos[memberName]) {
+        const scratch = join(groupDir(config, groupName), memberName);
+        if (existsSync(scratch)) {
+            throw new Error(`Scratchpad path already exists: ${scratch}`);
+        }
+        mkdirSync(scratch, { recursive: true });
+        const member: MemberState = { repo: memberName, kind: "app", path: scratch, exposes: {} };
+        group.members[memberName] = member;
+        saveGroup(config, group);
+
+        console.log("");
+        assignGroupVariables(home, profile, config, group);
+        wireGroup(config, group);
+        saveGroup(config, group);
+
+        console.log(`\n✓ Added app "${memberName}" to group "${groupName}"`);
+        console.log(`  ${memberName}: ${scratch}`);
+        return;
+    }
+
+    const repoCfg = config.repos[memberName];
     if (!repoCfg) {
         throw new Error(
-            `Unknown repo "${repoName}". Available: ${Object.keys(config.repos).join(", ")}`,
+            `Unknown repo or app "${memberName}". Available: ` +
+                `${[...Object.keys(config.repos), ...Object.keys(config.apps ?? {})].join(", ")}`,
         );
-    }
-    if (group.members[repoName]) {
-        throw new Error(`Repo "${repoName}" is already in group "${groupName}"`);
     }
 
     const repoPath = expandPath(repoCfg.path);
@@ -42,32 +66,32 @@ export async function addCommand(
         throw new Error(`Worktree path already exists: ${worktreePath}`);
     }
 
-    console.log(`[${repoName}] git fetch`);
+    console.log(`[${memberName}] git fetch`);
     fetchRepo(repoPath);
 
     const repoBranch = group.branch;
 
-    const release = planMainCheckoutRelease(config, repoCfg, repoName, repoPath, repoBranch);
+    const release = planMainCheckoutRelease(config, repoCfg, memberName, repoPath, repoBranch);
     if (release.error) {
         throw new Error(release.error);
     }
     if (release.plan) {
-        executeMainCheckoutRelease(repoName, repoPath, repoBranch, release.plan);
+        executeMainCheckoutRelease(memberName, repoPath, repoBranch, release.plan);
     }
 
-    console.log(`[${repoName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
+    console.log(`[${memberName}] creating worktree at ${worktreePath} (branch: ${repoBranch})`);
     addWorktree(repoPath, worktreePath, repoBranch, resolveBranchBase(repoCfg));
 
-    const member = {
-        repo: repoName,
+    const member: MemberState = {
+        repo: memberName,
         path: worktreePath,
         branch: repoBranch,
         exposes: {},
     };
-    group.members[repoName] = member;
+    group.members[memberName] = member;
     saveGroup(config, group);
 
-    const ctx = { repoName, groupName, repoCfg, repoPath, worktreePath };
+    const ctx = { repoName: memberName, groupName, repoCfg, repoPath, worktreePath };
     for (const phase of PHASES) {
         await runMemberPhase(config, ctx, member, phase, { verbose: opts.verbose });
     }
@@ -81,6 +105,6 @@ export async function addCommand(
 
     saveGroup(config, group);
 
-    console.log(`\n✓ Added "${repoName}" to group "${groupName}"`);
-    console.log(`  ${repoName}: ${worktreePath}`);
+    console.log(`\n✓ Added "${memberName}" to group "${groupName}"`);
+    console.log(`  ${memberName}: ${worktreePath}`);
 }

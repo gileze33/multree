@@ -132,13 +132,14 @@ export function assignGroupVariables(
     config: MultreeConfig,
     group: GroupState,
 ): void {
-    for (const [repoName, member] of Object.entries(group.members)) {
-        const specs = config.repos[repoName]?.variables;
+    for (const [memberName, member] of Object.entries(group.members)) {
+        // A member is a repo or an app; both declare `variables` the same way.
+        const specs = (config.repos[memberName] ?? config.apps?.[memberName])?.variables;
         member.variables = allocateMemberVariables(
             home,
             profile,
             group.name,
-            repoName,
+            memberName,
             specs,
             member.variables,
         );

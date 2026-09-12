@@ -1,5 +1,5 @@
 import { closeWorkspace, cmuxReachable } from "../cmux.ts";
-import { expandPath, loadConfig } from "../config.ts";
+import { expandPath, loadConfig, memberConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { deleteGroupDir, loadGroup } from "../state.ts";
@@ -16,18 +16,20 @@ export async function destroyCommand(name: string): Promise<void> {
     // to the very end (see below), after which group state no longer exists.
     const cmuxWorkspaceId = group.cmux?.workspace_id;
 
-    for (const [repoName, member] of Object.entries(group.members)) {
-        const repoCfg = config.repos[repoName];
-        if (!repoCfg) {
-            console.warn(`[${repoName}] no longer in config; skipping hooks`);
+    for (const [memberName, member] of Object.entries(group.members)) {
+        const repoCfg = config.repos[memberName];
+        const mCfg = memberConfig(config, memberName);
+        if (!mCfg) {
+            console.warn(`[${memberName}] no longer in config; skipping hooks`);
             continue;
         }
 
-        const teardownHook = normalizeHook(repoCfg.hooks?.teardown);
-        if (teardownHook) {
+        // Only repos have teardown hooks; apps are just scratchpad dirs removed below.
+        const teardownHook = repoCfg ? normalizeHook(repoCfg.hooks?.teardown) : undefined;
+        if (teardownHook && repoCfg) {
             await runMemberHook({
                 phase: "teardown",
-                repoName,
+                repoName: memberName,
                 groupName: name,
                 hook: teardownHook,
                 repoPath: expandPath(repoCfg.path),
@@ -37,8 +39,11 @@ export async function destroyCommand(name: string): Promise<void> {
             });
         }
 
-        console.log(`[${repoName}] removing worktree`);
-        removeWorktree(expandPath(repoCfg.path), member.path);
+        if (repoCfg) {
+            console.log(`[${memberName}] removing worktree`);
+            removeWorktree(expandPath(repoCfg.path), member.path);
+        }
+        // Apps have only a scratchpad dir, deleted wholesale by deleteGroupDir below.
     }
 
     deleteGroupDir(config, name);

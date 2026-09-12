@@ -86,7 +86,7 @@ describe("create --from", () => {
             "frontend-other",
         ]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /"frontend" is not in the selected repos: api/);
+        assert.match(r.stderr, /"frontend" is not in the selected members: api/);
     });
 
     // The selection can come from the manifest rather than the flag, so the
@@ -109,7 +109,7 @@ describe("create --from", () => {
             "feature-x",
         ]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /"frontend" is not in the selected repos: api/);
+        assert.match(r.stderr, /"frontend" is not in the selected members: api/);
     });
 
     it("errors when --from branch does not exist (and creates no worktrees)", () => {

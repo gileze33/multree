@@ -121,19 +121,24 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     const include = resolveInclude(args.include, config, manifestPath);
     const resolved: ResolvedCreateArgs = { ...args, include };
 
-    for (const repo of include) {
-        if (!config.repos[repo]) {
+    for (const name of include) {
+        if (!config.repos[name] && !config.apps?.[name]) {
             throw new Error(
-                `Unknown repo "${repo}". Available: ${Object.keys(config.repos).join(", ")}`,
+                `Unknown repo or app "${name}". Available: ` +
+                    `${[...Object.keys(config.repos), ...Object.keys(config.apps ?? {})].join(", ")}`,
             );
         }
     }
-    for (const repo of Object.keys(args.branchesByRepo ?? {})) {
-        if (!include.includes(repo)) {
+    for (const name of Object.keys(args.branchesByRepo ?? {})) {
+        if (!include.includes(name)) {
             throw new Error(
-                `--from-${repo} given but "${repo}" is not in the selected repos: ` +
+                `--from-${name} given but "${name}" is not in the selected members: ` +
                     include.join(", "),
             );
+        }
+        // Apps have no source tree, so a --from-<name> branch override is a repo-only concept.
+        if (!config.repos[name]) {
+            throw new Error(`--from-${name} given but "${name}" is an app, which has no branch`);
         }
     }
     if (args.from && args.branch) {
@@ -194,6 +199,11 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     await runPhase(config, group, plans, "prime", jobs, args.verbose ?? false);
     await runPhase(config, group, plans, "install", jobs, args.verbose ?? false);
     await runPhase(config, group, plans, "setup", jobs, args.verbose ?? false);
+
+    // Apps: no worktree/prime/install — a scratchpad dir plus an optional setup
+    // hook. Brought in after repo setup so an app can depend_on a repo's exposes.
+    const appInclude = include.filter(n => config.apps?.[n] && !config.repos[n]);
+    includeApps(config, group, appInclude);
 
     console.log("");
     assignGroupVariables(home, profile, config, group);
@@ -394,6 +404,11 @@ function preflight(
 
     for (const repoName of args.include) {
         const repoCfg = config.repos[repoName];
+        if (!repoCfg) {
+            // Apps aren't worktrees; they're set up (scratchpad + hook) after
+            // the repo phases, so they don't take part in preflight.
+            continue;
+        }
         const repoPath = expandPath(repoCfg.path);
         const worktreePath = join(dir, basename(repoPath));
         const repoBranch = args.branchesByRepo?.[repoName] ?? defaultBranch;
@@ -446,4 +461,29 @@ function preflight(
         );
     }
     return plans;
+}
+
+// Bring each app into the group: make its per-group scratchpad dir (no git,
+// prime, or install) and register it as a member. Apps are ordered by
+// depends_on among themselves; a dependency on a repo is already satisfied
+// because repo setup ran first.
+function includeApps(config: MultreeConfig, group: GroupState, appNames: string[]): void {
+    if (appNames.length === 0) {
+        return;
+    }
+    const deps: Record<string, string[]> = {};
+    for (const name of appNames) {
+        const d = (config.apps![name].depends_on ?? []).filter(x => appNames.includes(x));
+        if (d.length > 0) {
+            deps[name] = d;
+        }
+    }
+    for (const appName of topoOrder(appNames, deps)) {
+        const scratch = join(groupDir(config, group.name), appName);
+        mkdirSync(scratch, { recursive: true });
+        if (!group.members[appName]) {
+            group.members[appName] = { repo: appName, kind: "app", path: scratch, exposes: {} };
+            saveGroup(config, group);
+        }
+    }
 }

@@ -49,6 +49,9 @@ export async function listCommand(): Promise<void> {
     const probes: Probe[] = [];
     groups.forEach((g, gi) => {
         for (const member of Object.values(g.members)) {
+            if (member.kind === "app") {
+                continue; // apps have no git worktree to probe for dirty/last-commit
+            }
             probes.push({ group: gi, kind: "dirty", path: member.path });
             probes.push({ group: gi, kind: "time", path: member.path });
         }
