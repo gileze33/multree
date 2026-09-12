@@ -100,6 +100,29 @@ Keep multiple discrete manifests — one per employer, project, or experiment �
 
 Env wiring is bracketed by `# >>> multree-managed: <group> >>>` / `# <<< multree-managed: <group> <<<` so repeated `rewire` calls don't leak.
 
+### Apps
+
+An **app** is a group member with no git worktree — a sidecar process (a local mail sink, a mock service, a tunnel) run from a published binary rather than checked out and developed. It gets a per-group scratchpad directory at `<worktree_root>/<group>/<app-name>/` instead of a worktree, and joins the same variable / env / mcp wiring as repos. Declare apps under a top-level `apps:` map, sibling to `repos:`:
+
+- `apps.<name>.variables.<key>` — per-group allocated values, same as a repo's `variables`, exposed as `{<name>.<key>}`.
+- `apps.<name>.env` — a templated environment map (`{member.key}` tokens) injected directly into the `run` process. Unlike a repo's file-based `consumes`, multree launches the process itself, so no dotfile is written.
+- `apps.<name>.run` — the command, dispatched as `multree run <group> <app>` (foreground, with `env` injected), run in the scratchpad.
+- `apps.<name>.depends_on` — other members whose `setup` must finish first (e.g. a sidecar that needs a repo's allocated port).
+- `apps.<name>.mcps.<server>` — MCP servers the app contributes to the group-root `.mcp.json` (see below).
+
+Apps are included per group like repos (`--include api,mailcatcher`, or `default_include`), and an app name must be unique across all repos and apps. An app has no `hooks`, `exposes`, `consumes`, or command verbs beyond `run` — those stay repo-only.
+
+The built-in `{<member>.included}` token resolves to `"true"` when the member is in the group and `""` otherwise (overridable via `defaults.included`), so a repo can `consume` a value that only takes effect when a given sidecar is present.
+
+### MCP servers at the group root
+
+Every member's `mcps.<server>` block merges into a single `<worktree_root>/<group>/.mcp.json` under `mcpServers`, so an agent launched at the group root (e.g. `claude` from within `multree shell <group>`) can reach them. multree owns only the servers it writes (tracked in group state), so `rewire` updates them and `remove`/`destroy` clean them up without disturbing hand-added entries. Templated fields in a server spec (e.g. `url`) are resolved against the wiring context.
+
+Two top-level `claude_workspace` switches augment the group root for an agent opened there:
+
+- `claude_workspace.hoist_member_mcps` — fold each repo member's own checked-in `.mcp.json` servers into the group-root `.mcp.json` (subdirectory `.mcp.json` files are otherwise never discovered). A relative `stdio` command is resolved against its member worktree.
+- `claude_workspace.additional_directories` — write `<group-root>/.claude/settings.json` with `permissions.additionalDirectories` listing the member worktrees (nested git repos that inherited folder-trust would otherwise exclude).
+
 ## Worked example
 
 With an `api` and `frontend` repo declared in your manifest (see [`multree.config.example.yaml`](./multree.config.example.yaml) for the full shape, including `exposes`/`consumes` wiring), run:
