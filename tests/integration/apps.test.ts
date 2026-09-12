@@ -270,28 +270,14 @@ describe("claude_workspace (hoist member mcps + additionalDirectories)", () => {
     });
 });
 
-describe("apps (setup/teardown hooks, exposes, command verbs)", () => {
-    // api consumes the app's exposed value, so whatever the app's setup hook
-    // produces must reach the wiring context. mc's setup writes a marker + an
-    // exposes file in the scratchpad; its teardown traces (via the `cwd: repo`
-    // form, to exercise the app's scratchpad fallback); it also has a non-run
-    // command verb.
-    function hookSandbox(): Sandbox {
+describe("apps (command verbs)", () => {
+    // mc has a non-run command verb; api is a plain repo to round out the group.
+    function cmdSandbox(): Sandbox {
         return createSandbox({
-            repos: [
-                {
-                    key: "api",
-                    dirname: "fake-api",
-                    consumes: { file: ".env.local", upsert: { MC_READY: "{mc.ready}" } },
-                },
-            ],
+            repos: [{ key: "api", dirname: "fake-api" }],
             apps: [
                 {
                     key: "mc",
-                    setup: trace("mc:setup", `echo "READY=yes" > .mc.env`),
-                    teardown: { command: trace("mc:teardown"), cwd: "repo" },
-                    exposes: { ready: { type: "env_file", file: ".mc.env", key: "READY" } },
-                    defaults: { ready: "no" },
                     commands: { logs: 'echo "LOGS CWD=$(pwd)"' },
                     run: "echo run",
                 },
@@ -300,39 +286,8 @@ describe("apps (setup/teardown hooks, exposes, command verbs)", () => {
     }
 
     let sb: Sandbox;
-    beforeEach(() => (sb = hookSandbox()));
+    beforeEach(() => (sb = cmdSandbox()));
     afterEach(() => sb.cleanup());
-
-    it("runs the app setup hook in the scratchpad on create, and its exposes reaches wiring", () => {
-        const r = runMultree(sb, ["create", "g", "--include", "api,mc"]);
-        assert.equal(r.status, 0, r.stderr);
-
-        assert.ok(sb.trace().includes("mc:setup"), "setup hook did not run");
-        assert.ok(existsSync(join(sb.worktreeRoot, "g", "mc", ".mc.env")), "setup marker missing");
-        const apiEnv = readFileSync(join(sb.worktreePath("g", "api"), ".env.local"), "utf-8");
-        assert.match(apiEnv, /MC_READY=yes/);
-    });
-
-    it("runs the app teardown hook on destroy", () => {
-        runMultree(sb, ["create", "g", "--include", "api,mc"]);
-        const r = runMultree(sb, ["destroy", "g"]);
-        assert.equal(r.status, 0, r.stderr);
-        assert.ok(sb.trace().includes("mc:teardown"), "teardown hook did not run on destroy");
-    });
-
-    it("runs setup on add and teardown on remove", () => {
-        runMultree(sb, ["create", "g", "--include", "api"]);
-        const added = runMultree(sb, ["add", "g", "mc"]);
-        assert.equal(added.status, 0, added.stderr);
-        assert.ok(sb.trace().includes("mc:setup"), "setup hook did not run on add");
-        assert.ok(existsSync(join(sb.worktreeRoot, "g", "mc", ".mc.env")));
-        const apiEnv = readFileSync(join(sb.worktreePath("g", "api"), ".env.local"), "utf-8");
-        assert.match(apiEnv, /MC_READY=yes/);
-
-        const removed = runMultree(sb, ["remove", "g", "mc"]);
-        assert.equal(removed.status, 0, removed.stderr);
-        assert.ok(sb.trace().includes("mc:teardown"), "teardown hook did not run on remove");
-    });
 
     it("dispatches an app's non-run command verb in the scratchpad", () => {
         runMultree(sb, ["create", "g", "--include", "api,mc"]);

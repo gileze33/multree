@@ -9,7 +9,7 @@ import {
 import { ensureCmuxWorkspace, formatOpenResult, shouldOpenCmux } from "../cmux.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, branchExists, fetchRepo, remoteBranchExists } from "../git.ts";
-import { HookFailureError, HookTimeoutError, normalizeHook, runMemberHook } from "../hooks.ts";
+import { HookFailureError, HookTimeoutError, normalizeHook } from "../hooks.ts";
 import { runMemberPhase } from "../phases.ts";
 import { runScheduled, topoOrder } from "../scheduler.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
@@ -20,7 +20,7 @@ import type {
     RepoConfig,
 } from "../types.ts";
 import { assignGroupVariables } from "../variables.ts";
-import { readExposes, wireGroup } from "../wiring.ts";
+import { wireGroup } from "../wiring.ts";
 
 interface CreateArgs {
     name: string;
@@ -203,7 +203,7 @@ export async function createCommand(args: CreateArgs): Promise<void> {
     // Apps: no worktree/prime/install — a scratchpad dir plus an optional setup
     // hook. Brought in after repo setup so an app can depend_on a repo's exposes.
     const appInclude = include.filter(n => config.apps?.[n] && !config.repos[n]);
-    await includeApps(config, group, appInclude, args.verbose ?? false);
+    includeApps(config, group, appInclude);
 
     console.log("");
     assignGroupVariables(home, profile, config, group);
@@ -463,17 +463,11 @@ function preflight(
     return plans;
 }
 
-// Bring each app into the group: make its per-group scratchpad dir (no git, no
-// prime, no install), register it as a member, and run its optional setup hook
-// in the scratchpad. Apps are ordered by depends_on among themselves; a
-// dependency on a repo is already satisfied because repo setup ran first. Newly
-// created (vs --resume) apps are the only ones whose setup re-runs.
-async function includeApps(
-    config: MultreeConfig,
-    group: GroupState,
-    appNames: string[],
-    verbose: boolean,
-): Promise<void> {
+// Bring each app into the group: make its per-group scratchpad dir (no git,
+// prime, or install) and register it as a member. Apps are ordered by
+// depends_on among themselves; a dependency on a repo is already satisfied
+// because repo setup ran first.
+function includeApps(config: MultreeConfig, group: GroupState, appNames: string[]): void {
     if (appNames.length === 0) {
         return;
     }
@@ -485,28 +479,10 @@ async function includeApps(
         }
     }
     for (const appName of topoOrder(appNames, deps)) {
-        const appCfg = config.apps![appName];
         const scratch = join(groupDir(config, group.name), appName);
-        const isNew = !group.members[appName];
         mkdirSync(scratch, { recursive: true });
-        if (isNew) {
+        if (!group.members[appName]) {
             group.members[appName] = { repo: appName, kind: "app", path: scratch, exposes: {} };
-            saveGroup(config, group);
-        }
-        const setup = normalizeHook(appCfg.hooks?.setup);
-        if (isNew && setup) {
-            await runMemberHook({
-                phase: "setup",
-                repoName: appName,
-                groupName: group.name,
-                hook: setup,
-                repoPath: scratch,
-                worktreePath: scratch,
-                repoCfg: appCfg,
-                config,
-                verbose,
-            });
-            group.members[appName].exposes = readExposes(scratch, appCfg.exposes);
             saveGroup(config, group);
         }
     }

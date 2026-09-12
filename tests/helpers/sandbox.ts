@@ -12,7 +12,6 @@ import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import type {
     ActionSpec,
-    AppConfig,
     ClaudeWorkspaceConfig,
     ConsumeSpec,
     ExposeSpec,
@@ -70,7 +69,6 @@ export interface FakeRepoSpec {
 export interface FakeAppSpec {
     key: string;
     variables?: Record<string, VariableSpec>;
-    exposes?: Record<string, ExposeSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     env?: Record<string, string>;
@@ -78,8 +76,6 @@ export interface FakeAppSpec {
     commands?: Record<string, ActionSpec>;
     mcps?: Record<string, McpServerSpec>;
     dependsOn?: string[];
-    setup?: HookSpec;
-    teardown?: HookSpec;
 }
 
 export interface SandboxOptions {
@@ -251,16 +247,8 @@ function buildAppMap(specs: FakeAppSpec[] | undefined): MultreeConfig["apps"] {
     }
     const apps: NonNullable<MultreeConfig["apps"]> = {};
     for (const spec of specs) {
-        const hooks: NonNullable<AppConfig["hooks"]> = {};
-        if (spec.setup) {
-            hooks.setup = spec.setup;
-        }
-        if (spec.teardown) {
-            hooks.teardown = spec.teardown;
-        }
         apps[spec.key] = {
             variables: spec.variables,
-            exposes: spec.exposes,
             consumes: spec.consumes,
             defaults: spec.defaults,
             env: spec.env,
@@ -268,7 +256,6 @@ function buildAppMap(specs: FakeAppSpec[] | undefined): MultreeConfig["apps"] {
             commands: spec.commands,
             mcps: spec.mcps,
             depends_on: spec.dependsOn,
-            hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
         };
     }
     return apps;

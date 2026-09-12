@@ -24,18 +24,17 @@ export async function destroyCommand(name: string): Promise<void> {
             continue;
         }
 
-        const teardownHook = normalizeHook(mCfg.hooks?.teardown);
-        if (teardownHook) {
+        // Only repos have teardown hooks; apps are just scratchpad dirs removed below.
+        const teardownHook = repoCfg ? normalizeHook(repoCfg.hooks?.teardown) : undefined;
+        if (teardownHook && repoCfg) {
             await runMemberHook({
                 phase: "teardown",
                 repoName: memberName,
                 groupName: name,
                 hook: teardownHook,
-                // Apps have no source checkout; a `cwd: repo` hook falls back to
-                // the scratchpad.
-                repoPath: repoCfg ? expandPath(repoCfg.path) : member.path,
+                repoPath: expandPath(repoCfg.path),
                 worktreePath: member.path,
-                repoCfg: mCfg,
+                repoCfg,
                 config,
             });
         }

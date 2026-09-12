@@ -122,14 +122,13 @@ export interface RepoConfig {
 
 // An `app` is a group member with no source tree: a sidecar process (a mail
 // sink, a mock service, a tunnel) run from a published binary rather than
-// checked out and developed. It participates in the variables / exposes /
-// consumes / mcps wiring exactly like a repo, but is backed by a per-group
+// checked out and developed. It participates in the variables / consumes /
+// mcps wiring like a repo, but is backed by a per-group
 // scratchpad directory (<worktree_root>/<group>/<app-name>/) instead of a git
 // worktree, and is launched from `run` (with `env` injected) rather than
 // prime/install/build hooks.
 export interface AppConfig {
     variables?: Record<string, VariableSpec>;
-    exposes?: Record<string, ExposeSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
     mcps?: Record<string, McpServerSpec>;
     defaults?: Record<string, string | number>;
@@ -143,19 +142,12 @@ export interface AppConfig {
     // <app>`. The reserved verb `run` comes from `run` above.
     commands?: Record<string, ActionSpec>;
     depends_on?: string[];
-    // Apps have no source tree to prime or dependencies to install, so only the
-    // setup/teardown phases (run in the scratchpad) apply.
-    hooks?: {
-        setup?: HookSpec;
-        teardown?: HookSpec;
-        timeout?: string | number;
-    };
 }
 
 // The shared shape the wiring / variables machinery reads: repos and apps are
 // both "members". Only fields present on both kinds are reachable through the
-// union, which is exactly the wiring surface (variables/exposes/consumes/
-// defaults/mcps/commands/depends_on/hooks).
+// union (variables/consumes/defaults/mcps/commands/depends_on); `exposes` and
+// `hooks` are repo-only.
 export type MemberConfig = RepoConfig | AppConfig;
 
 export interface ToolConfig {

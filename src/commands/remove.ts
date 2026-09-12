@@ -1,5 +1,5 @@
 import { rmSync } from "fs";
-import { expandPath, loadConfig, memberConfig } from "../config.ts";
+import { expandPath, loadConfig } from "../config.ts";
 import { removeWorktree } from "../git.ts";
 import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { loadGroup, saveGroup } from "../state.ts";
@@ -19,20 +19,18 @@ export async function removeCommand(groupName: string, memberName: string): Prom
     }
 
     const repoCfg = config.repos[memberName];
-    const mCfg = memberConfig(config, memberName);
 
-    const teardownHook = normalizeHook(mCfg?.hooks?.teardown);
-    if (teardownHook && mCfg) {
+    // Only repos have teardown hooks; an app is just a scratchpad to delete.
+    const teardownHook = repoCfg ? normalizeHook(repoCfg.hooks?.teardown) : undefined;
+    if (teardownHook && repoCfg) {
         await runMemberHook({
             phase: "teardown",
             repoName: memberName,
             groupName,
             hook: teardownHook,
-            // Apps have no source checkout, so a `cwd: repo` hook falls back to
-            // the scratchpad.
-            repoPath: repoCfg ? expandPath(repoCfg.path) : member.path,
+            repoPath: expandPath(repoCfg.path),
             worktreePath: member.path,
-            repoCfg: mCfg,
+            repoCfg,
             config,
         });
     }

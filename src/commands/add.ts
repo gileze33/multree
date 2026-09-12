@@ -3,12 +3,11 @@ import { basename, join } from "path";
 import { executeMainCheckoutRelease, planMainCheckoutRelease } from "../branch.ts";
 import { expandPath, loadConfig, resolveBranchBase } from "../config.ts";
 import { addWorktree, fetchRepo } from "../git.ts";
-import { normalizeHook, runMemberHook } from "../hooks.ts";
 import { runMemberPhase } from "../phases.ts";
 import { groupDir, loadGroup, saveGroup } from "../state.ts";
 import type { MemberState, PhaseName } from "../types.ts";
 import { assignGroupVariables } from "../variables.ts";
-import { readExposes, wireGroup } from "../wiring.ts";
+import { wireGroup } from "../wiring.ts";
 
 interface AddOptions {
     verbose?: boolean;
@@ -42,22 +41,6 @@ export async function addCommand(
         const member: MemberState = { repo: memberName, kind: "app", path: scratch, exposes: {} };
         group.members[memberName] = member;
         saveGroup(config, group);
-
-        const setup = normalizeHook(appCfg.hooks?.setup);
-        if (setup) {
-            await runMemberHook({
-                phase: "setup",
-                repoName: memberName,
-                groupName,
-                hook: setup,
-                repoPath: scratch,
-                worktreePath: scratch,
-                repoCfg: appCfg,
-                config,
-                verbose: opts.verbose,
-            });
-            member.exposes = readExposes(scratch, appCfg.exposes);
-        }
 
         console.log("");
         assignGroupVariables(home, profile, config, group);

@@ -178,12 +178,13 @@ export function clearConsumes(
  */
 export function wireGroup(config: MultreeConfig, group: GroupState): void {
     for (const [memberName, member] of Object.entries(group.members)) {
-        const mCfg = memberConfig(config, memberName);
-        if (!mCfg) {
+        if (!memberConfig(config, memberName)) {
             console.warn(`[${memberName}] no longer in config; skipping exposes`);
             continue;
         }
-        member.exposes = readExposes(member.path, mCfg.exposes);
+        // Only repos expose values from a source-tree file; apps have none.
+        const repoCfg = config.repos[memberName];
+        member.exposes = repoCfg ? readExposes(member.path, repoCfg.exposes) : {};
     }
 
     const ctx = buildContext(config, group);

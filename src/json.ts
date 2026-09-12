@@ -1,5 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { dirname } from "path";
+
+// Read a JSON object from `path`, or {} when the file is missing or is not a
+// JSON object. Deliberately no `existsSync` pre-check: a missing file (ENOENT)
+// or hand-broken JSON both fall through to {}, which avoids a check-then-read
+// race. A hand-broken file is not authoritative for our managed block anyway,
+// and an unparseable settings/.mcp.json was already inert.
+function readJsonObject(path: string): Record<string, unknown> {
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return parsed as Record<string, unknown>;
+        }
+    } catch {
+        // Missing or unparseable -> empty.
+    }
+    return {};
+}
+
+// Delete `path`, tolerating a file that is already gone. No `existsSync`
+// pre-check, to avoid a check-then-unlink race.
+function removeFile(path: string): void {
+    try {
+        unlinkSync(path);
+    } catch {
+        // Already absent.
+    }
+}
 
 // Merge multree-owned MCP servers into a group-root `.mcp.json` under
 // `mcpServers`, keyed by server name.
@@ -18,21 +45,7 @@ export function writeGroupMcpJson(
 ): string[] {
     const owned = Object.keys(servers);
 
-    let doc: Record<string, unknown> = {};
-    if (existsSync(path)) {
-        try {
-            const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                doc = parsed as Record<string, unknown>;
-            }
-        } catch {
-            // A hand-broken / non-JSON file is not authoritative for our block;
-            // start from an empty document rather than throwing and blocking the
-            // whole wire step. Foreign content that can't be parsed is lost, but
-            // an unparseable .mcp.json was already inert.
-            doc = {};
-        }
-    }
+    const doc = readJsonObject(path);
 
     const existing = doc.mcpServers;
     const mcpServers: Record<string, unknown> =
@@ -61,9 +74,7 @@ export function writeGroupMcpJson(
     // keys), remove the file so the group root stays clean; otherwise write the
     // merged document back.
     if (Object.keys(doc).length === 0) {
-        if (existsSync(path)) {
-            unlinkSync(path);
-        }
+        removeFile(path);
     } else {
         writeFileSync(path, JSON.stringify(doc, null, 2) + "\n");
     }
@@ -75,19 +86,9 @@ export function writeGroupMcpJson(
 // Returns null when the file is missing or invalid — a broken member `.mcp.json`
 // must not block the wire step, so it is treated as "no servers".
 export function readMcpServers(path: string): Record<string, unknown> | null {
-    if (!existsSync(path)) {
-        return null;
-    }
-    try {
-        const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const servers = (parsed as Record<string, unknown>).mcpServers;
-            if (servers && typeof servers === "object" && !Array.isArray(servers)) {
-                return servers as Record<string, unknown>;
-            }
-        }
-    } catch {
-        // Unparseable -> treat as absent.
+    const servers = readJsonObject(path).mcpServers;
+    if (servers && typeof servers === "object" && !Array.isArray(servers)) {
+        return servers as Record<string, unknown>;
     }
     return null;
 }
@@ -102,17 +103,7 @@ export function writeGroupSettingsJson(
     dirs: string[],
     previouslyOwned: string[],
 ): string[] {
-    let doc: Record<string, unknown> = {};
-    if (existsSync(path)) {
-        try {
-            const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                doc = parsed as Record<string, unknown>;
-            }
-        } catch {
-            doc = {};
-        }
-    }
+    const doc = readJsonObject(path);
 
     const permsRaw = doc.permissions;
     const permissions: Record<string, unknown> =
@@ -147,9 +138,7 @@ export function writeGroupSettingsJson(
     }
 
     if (Object.keys(doc).length === 0) {
-        if (existsSync(path)) {
-            unlinkSync(path);
-        }
+        removeFile(path);
     } else {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, JSON.stringify(doc, null, 2) + "\n");
