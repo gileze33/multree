@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { runMultree } from "../helpers/cli.ts";
