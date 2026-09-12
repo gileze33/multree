@@ -122,32 +122,28 @@ export interface RepoConfig {
 
 // An `app` is a group member with no source tree: a sidecar process (a mail
 // sink, a mock service, a tunnel) run from a published binary rather than
-// checked out and developed. It participates in the variables / consumes /
-// mcps wiring like a repo, but is backed by a per-group
+// checked out and developed. It participates in the variables / mcps wiring
+// like a repo, but is backed by a per-group
 // scratchpad directory (<worktree_root>/<group>/<app-name>/) instead of a git
 // worktree, and is launched from `run` (with `env` injected) rather than
 // prime/install/build hooks.
 export interface AppConfig {
     variables?: Record<string, VariableSpec>;
-    consumes?: ConsumeSpec | ConsumeSpec[];
     mcps?: Record<string, McpServerSpec>;
     defaults?: Record<string, string | number>;
     // Templated env injected into the process when the app runs. Unlike a repo's
     // file-based `consumes`, multree launches the process itself, so it sets
     // these directly in the child environment — no dotfile is written.
     env?: Record<string, string>;
-    // The app's primary command, dispatched as `multree run <group> <app>`.
+    // The app's command, dispatched as `multree run <group> <app>`.
     run?: string | string[];
-    // Optional extra verbs on the app target; each is `multree <verb> <group>
-    // <app>`. The reserved verb `run` comes from `run` above.
-    commands?: Record<string, ActionSpec>;
     depends_on?: string[];
 }
 
 // The shared shape the wiring / variables machinery reads: repos and apps are
 // both "members". Only fields present on both kinds are reachable through the
-// union (variables/consumes/defaults/mcps/commands/depends_on); `exposes` and
-// `hooks` are repo-only.
+// union (variables/mcps/defaults/depends_on); `exposes`, `hooks`, `consumes`,
+// and `commands` are repo-only.
 export type MemberConfig = RepoConfig | AppConfig;
 
 export interface ToolConfig {

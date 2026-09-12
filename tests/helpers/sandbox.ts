@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import type {
-    ActionSpec,
     ClaudeWorkspaceConfig,
     ConsumeSpec,
     ExposeSpec,
@@ -69,11 +68,9 @@ export interface FakeRepoSpec {
 export interface FakeAppSpec {
     key: string;
     variables?: Record<string, VariableSpec>;
-    consumes?: ConsumeSpec | ConsumeSpec[];
     defaults?: Record<string, string | number>;
     env?: Record<string, string>;
     run?: string | string[];
-    commands?: Record<string, ActionSpec>;
     mcps?: Record<string, McpServerSpec>;
     dependsOn?: string[];
 }
@@ -249,11 +246,9 @@ function buildAppMap(specs: FakeAppSpec[] | undefined): MultreeConfig["apps"] {
     for (const spec of specs) {
         apps[spec.key] = {
             variables: spec.variables,
-            consumes: spec.consumes,
             defaults: spec.defaults,
             env: spec.env,
             run: spec.run,
-            commands: spec.commands,
             mcps: spec.mcps,
             depends_on: spec.dependsOn,
         };

@@ -270,35 +270,6 @@ describe("claude_workspace (hoist member mcps + additionalDirectories)", () => {
     });
 });
 
-describe("apps (command verbs)", () => {
-    // mc has a non-run command verb; api is a plain repo to round out the group.
-    function cmdSandbox(): Sandbox {
-        return createSandbox({
-            repos: [{ key: "api", dirname: "fake-api" }],
-            apps: [
-                {
-                    key: "mc",
-                    commands: { logs: 'echo "LOGS CWD=$(pwd)"' },
-                    run: "echo run",
-                },
-            ],
-        });
-    }
-
-    let sb: Sandbox;
-    beforeEach(() => (sb = cmdSandbox()));
-    afterEach(() => sb.cleanup());
-
-    it("dispatches an app's non-run command verb in the scratchpad", () => {
-        runMultree(sb, ["create", "g", "--include", "api,mc"]);
-        const r = runMultree(sb, ["logs", "g", "mc"]);
-        assert.equal(r.status, 0, r.stderr);
-        assert.ok(
-            r.stdout.includes(`CWD=${realpathSync(join(sb.worktreeRoot, "g", "mc"))}`),
-            r.stdout,
-        );
-    });
-});
 
 describe("claude_workspace (hoist collision + member removal)", () => {
     it("manifest mcps wins over a hoisted member server of the same name", () => {

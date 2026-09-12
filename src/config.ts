@@ -6,7 +6,6 @@ import { SUBCOMMANDS } from "./completion.ts";
 import { detectCycle } from "./scheduler.ts";
 import type {
     ActionSpec,
-    AppConfig,
     MainCheckoutAction,
     McpServerSpec,
     MemberConfig,
@@ -242,41 +241,11 @@ function validateApps(cfg: MultreeConfig): void {
             );
         }
         validateVariables(`App "${name}"`, app.variables);
-        validateAppCommands(name, app, cfg);
         validateMcps(`App "${name}"`, app.mcps);
         validateAppEnv(name, app.env);
         if (app.run !== undefined) {
             validateActionCommand(`App "${name}" run`, app.run);
         }
-    }
-}
-
-function validateAppCommands(appName: string, app: AppConfig, cfg: MultreeConfig): void {
-    if (!app.commands) {
-        return;
-    }
-    const builtins = new Set<string>(SUBCOMMANDS);
-    const toolNames = new Set(Object.keys(cfg.tools ?? {}));
-    for (const [verb, spec] of Object.entries(app.commands)) {
-        const where = `App "${appName}" command verb "${verb}"`;
-        if (!COMMAND_NAME_RE.test(verb)) {
-            throw new Error(`${where}: invalid name (alphanumerics, dot, underscore, hyphen only)`);
-        }
-        if (verb === "run") {
-            throw new Error(
-                `${where}: "run" is the app's primary verb; set it via the app's \`run\` field, not \`commands\``,
-            );
-        }
-        if (verb === RESERVED_TARGET_KEY) {
-            throw new Error(`${where}: "cwd" is reserved and is not a verb`);
-        }
-        if (builtins.has(verb)) {
-            throw new Error(`${where}: shadows the built-in subcommand "${verb}"; rename it`);
-        }
-        if (toolNames.has(verb)) {
-            throw new Error(`${where}: collides with the tool "${verb}"; rename it`);
-        }
-        validateActionCommand(where, spec);
     }
 }
 

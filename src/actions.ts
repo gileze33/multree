@@ -9,7 +9,7 @@ import { buildContext, buildMetaContext, resolveTemplate } from "./wiring.ts";
 // an action verb.
 export const RESERVED_TARGET_KEY = "cwd";
 
-// An app's primary verb. It comes from the app's `run` field, not `commands`.
+// An app's only verb, from its `run` field.
 const APP_RUN_VERB = "run";
 
 export interface ResolvedAction {
@@ -25,9 +25,8 @@ export interface ResolvedAction {
 }
 
 // Every action verb dispatchable in the manifest. Verbs are implicit: any
-// action key under a repo's command targets, plus an app's `run` and any of its
-// `commands` verbs, becomes dispatchable — mirroring how any `tools.<name>`
-// key becomes a verb.
+// action key under a repo's command targets, plus an app's `run`, becomes
+// dispatchable — mirroring how any `tools.<name>` key becomes a verb.
 export function collectActionVerbs(config: MultreeConfig): Set<string> {
     const verbs = new Set<string>();
     for (const repo of Object.values(config.repos)) {
@@ -41,9 +40,6 @@ export function collectActionVerbs(config: MultreeConfig): Set<string> {
         if (app.run !== undefined) {
             verbs.add(APP_RUN_VERB);
         }
-        for (const verb of Object.keys(app.commands ?? {})) {
-            verbs.add(verb);
-        }
     }
     return verbs;
 }
@@ -54,8 +50,7 @@ function actionsOf(target: TargetSpec): string[] {
 
 // The verbs an app target answers to, for help/error text.
 function appVerbs(app: AppConfig): string[] {
-    const verbs = app.run !== undefined ? [APP_RUN_VERB] : [];
-    return [...verbs, ...Object.keys(app.commands ?? {})].sort();
+    return app.run !== undefined ? [APP_RUN_VERB] : [];
 }
 
 function normalise(value: ActionSpec): { command: string | string[]; cwd?: string } {
@@ -75,12 +70,8 @@ function availableTargets(config: MultreeConfig, group: GroupState, action: stri
             }
         }
         const app = config.apps?.[memberKey];
-        if (app) {
-            if (action === APP_RUN_VERB && app.run !== undefined) {
-                targets.push(memberKey);
-            } else if (app.commands?.[action] !== undefined) {
-                targets.push(memberKey);
-            }
+        if (app && action === APP_RUN_VERB && app.run !== undefined) {
+            targets.push(memberKey);
         }
     }
     return [...new Set(targets)].sort();
@@ -139,7 +130,7 @@ export function resolveAction(
 
     const match = matches[0];
     if (match.kind === "app") {
-        const value = action === APP_RUN_VERB ? match.app.run : match.app.commands?.[action];
+        const value = action === APP_RUN_VERB ? match.app.run : undefined;
         if (value === undefined) {
             const list = appVerbs(match.app);
             throw new Error(

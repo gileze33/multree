@@ -190,11 +190,12 @@ export function wireGroup(config: MultreeConfig, group: GroupState): void {
     const ctx = buildContext(config, group);
     const meta = buildMetaContext(group);
     for (const [memberName, member] of Object.entries(group.members)) {
-        const mCfg = memberConfig(config, memberName);
-        if (!mCfg?.consumes) {
+        // Only repos consume into env files; apps inject `env` at run instead.
+        const repoCfg = config.repos[memberName];
+        if (!repoCfg?.consumes) {
             continue;
         }
-        const specs = Array.isArray(mCfg.consumes) ? mCfg.consumes : [mCfg.consumes];
+        const specs = Array.isArray(repoCfg.consumes) ? repoCfg.consumes : [repoCfg.consumes];
         console.log(`[${memberName}] wiring env`);
         for (const spec of specs) {
             applyConsumes(member.path, spec, group.name, ctx, meta);

@@ -463,14 +463,6 @@ describe("loadConfig", () => {
         assert.throws(() => loadConfig(), /env "PORT" must be a string/);
     });
 
-    it("rejects a 'run' verb inside an app's commands", () => {
-        writeFileSync(
-            join(home, "default.yaml"),
-            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      run: y\n",
-        );
-        assert.throws(() => loadConfig(), /"run" is the app's primary verb/);
-    });
-
     // ---- claude_workspace ----
 
     it("rejects a claude_workspace that is not a map", () => {
@@ -544,29 +536,13 @@ describe("loadConfig", () => {
         assert.throws(() => loadConfig(), /mcp server "bad name": invalid name/);
     });
 
-    // ---- app commands validation ----
+    // ---- app run validation ----
 
-    it("rejects an app command verb that shadows a builtin subcommand", () => {
+    it("rejects an app run command that is empty", () => {
         writeFileSync(
             join(home, "default.yaml"),
-            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      list: mc-list\n",
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: \"\"\n",
         );
-        assert.throws(() => loadConfig(), /shadows the built-in subcommand "list"/);
-    });
-
-    it("rejects an app command verb that collides with a tool name", () => {
-        writeFileSync(
-            join(home, "default.yaml"),
-            "version: 1\ntools:\n  open:\n    command: code\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      open: mc-open\n",
-        );
-        assert.throws(() => loadConfig(), /collides with the tool "open"/);
-    });
-
-    it("rejects an app command verb using the reserved cwd key", () => {
-        writeFileSync(
-            join(home, "default.yaml"),
-            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      cwd: nope\n",
-        );
-        assert.throws(() => loadConfig(), /"cwd" is reserved and is not a verb/);
+        assert.throws(() => loadConfig(), /run: command must not be empty/);
     });
 });

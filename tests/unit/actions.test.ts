@@ -118,7 +118,6 @@ describe("resolveAction (apps)", () => {
             apps: {
                 mc: {
                     run: "mc-serve",
-                    commands: { logs: "mc-logs" },
                     env: { PORT: "{mc.http_port}" },
                 },
             },
@@ -137,16 +136,10 @@ describe("resolveAction (apps)", () => {
         });
     });
 
-    it("resolves an app's non-run command verb in the scratchpad", () => {
-        const r = resolveAction(appCfg(), WITH_APP, "logs", "mc");
-        assert.equal(r.command, "mc-logs");
-        assert.equal(r.cwd, "/wt/mc");
-    });
-
     it("throws when an app has no such verb, listing its verbs", () => {
         assert.throws(
             () => resolveAction(appCfg(), WITH_APP, "ghost", "mc"),
-            /App "mc" has no action "ghost"\. Available: logs, run/,
+            /App "mc" has no action "ghost"\. Available: run/,
         );
     });
 

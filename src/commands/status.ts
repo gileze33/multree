@@ -43,20 +43,6 @@ export function statusCommand(args: StatusArgs): void {
             for (const [k, v] of Object.entries(member.variables ?? {})) {
                 console.log(`    variables.${k} = ${v}`);
             }
-            const appExposeKeys = Object.keys(member.exposes);
-            if (appExposeKeys.length > 0) {
-                console.log(`    exposes:`);
-                for (const k of appExposeKeys) {
-                    console.log(`      ${k} = ${member.exposes[k]}`);
-                }
-            }
-            const appConsumes = describeConsumes(config, appCfg.consumes, ctx, meta);
-            if (appConsumes.length > 0) {
-                console.log(`    consumes:`);
-                for (const line of appConsumes) {
-                    console.log(`      ${line}`);
-                }
-            }
             continue;
         }
 
