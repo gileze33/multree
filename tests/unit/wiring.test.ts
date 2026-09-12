@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { ConsumeSpec, ExposeSpec, GroupState, MultreeConfig } from "../../src/types.ts";
-import { applyConsumes, buildContext, readExposes, resolveTemplate } from "../../src/wiring.ts";
+import {
+    applyConsumes,
+    buildContext,
+    readExposes,
+    resolveHoistedServer,
+    resolveTemplate,
+} from "../../src/wiring.ts";
 
 // Capture every console.warn call made during `fn` and return them as joined
 // strings. Restores the original `console.warn` even when `fn` throws.
@@ -80,10 +86,12 @@ describe("buildContext", () => {
         assert.equal(ctx.api?.port, "5234");
     });
 
-    it("returns no entry for a repo with no defaults and not in the group", () => {
+    it("seeds only the presence token for a member with no defaults and not in the group", () => {
         const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
         const ctx = buildContext(config, group);
-        assert.equal(ctx.rn, undefined);
+        // Every declared member gets the built-in `included` token even with no
+        // variables/defaults; absent members resolve it to "" (falsy).
+        assert.deepEqual(ctx.rn, { included: "" });
     });
 
     it("stringifies numeric defaults", () => {
@@ -130,6 +138,71 @@ describe("buildContext with variable defaults", () => {
         };
         const ctx = buildContext(config, group);
         assert.equal(ctx.web?.port, "4002");
+    });
+});
+
+describe("buildContext presence token and apps", () => {
+    // A repo `api`, and an app `mailcatcher` with a variable + a defaults.included
+    // override, so we can assert the token in every combination.
+    const config: MultreeConfig = {
+        version: 1,
+        repos: { api: { path: "/x", defaults: { port: 5000 } } },
+        apps: {
+            mailcatcher: {
+                run: "cmd",
+                variables: { smtp_port: { type: "number", min: 1100, max: 1149, default: 1025 } },
+            },
+            gw: { run: "cmd", defaults: { included: "off" } },
+        },
+    };
+
+    it("resolves {member.included} to true for a live repo and app", () => {
+        const group: GroupState = {
+            name: "g",
+            branch: "b",
+            created_at: "",
+            members: {
+                api: { repo: "api", path: "/a", exposes: {} },
+                mailcatcher: { repo: "mailcatcher", kind: "app", path: "/m", exposes: {} },
+            },
+        };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.api.included, "true");
+        assert.equal(ctx.mailcatcher.included, "true");
+    });
+
+    it("resolves {app.included} to '' when the app is not in the group", () => {
+        const group: GroupState = {
+            name: "g",
+            branch: "b",
+            created_at: "",
+            members: { api: { repo: "api", path: "/a", exposes: {} } },
+        };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.mailcatcher.included, "");
+    });
+
+    it("lets defaults.included override the absent value", () => {
+        const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.gw.included, "off");
+    });
+
+    it("exposes an app's variable default when the app is absent", () => {
+        const group: GroupState = { name: "g", branch: "b", created_at: "", members: {} };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.mailcatcher.smtp_port, "1025");
+    });
+
+    it("presence wins over the seed even for a live app with no vars", () => {
+        const group: GroupState = {
+            name: "g",
+            branch: "b",
+            created_at: "",
+            members: { gw: { repo: "gw", kind: "app", path: "/g", exposes: {} } },
+        };
+        const ctx = buildContext(config, group);
+        assert.equal(ctx.gw.included, "true");
     });
 });
 
@@ -258,5 +331,49 @@ describe("applyConsumes self-heals embedded newlines in resolved values", () => 
             0,
             `expected no newline-related warnings; got: ${JSON.stringify(warnings)}`,
         );
+    });
+});
+
+describe("resolveHoistedServer", () => {
+    it("absolutizes a relative stdio command and defaults cwd to the member worktree", () => {
+        const out = resolveHoistedServer(
+            { command: "./bin/server.js", args: ["--flag"] },
+            "/wt/repo",
+        ) as Record<string, unknown>;
+        assert.equal(out.command, "/wt/repo/bin/server.js");
+        assert.equal(out.cwd, "/wt/repo");
+        assert.deepEqual(out.args, ["--flag"]);
+    });
+
+    it("defaults cwd but leaves a bare PATH command (node) untouched", () => {
+        const out = resolveHoistedServer(
+            { command: "node", args: ["x.js"] },
+            "/wt/repo",
+        ) as Record<string, unknown>;
+        assert.equal(out.command, "node");
+        assert.equal(out.cwd, "/wt/repo");
+    });
+
+    it("leaves an absolute command untouched but still defaults cwd", () => {
+        const out = resolveHoistedServer(
+            { command: "/usr/bin/foo" },
+            "/wt/repo",
+        ) as Record<string, unknown>;
+        assert.equal(out.command, "/usr/bin/foo");
+        assert.equal(out.cwd, "/wt/repo");
+    });
+
+    it("preserves an explicit cwd", () => {
+        const out = resolveHoistedServer(
+            { command: "./x", cwd: "sub" },
+            "/wt/repo",
+        ) as Record<string, unknown>;
+        assert.equal(out.command, "/wt/repo/x");
+        assert.equal(out.cwd, "sub");
+    });
+
+    it("leaves an http server unchanged", () => {
+        const spec = { type: "http", url: "http://localhost:9/mcp" };
+        assert.deepEqual(resolveHoistedServer(spec, "/wt/repo"), spec);
     });
 });

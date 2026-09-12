@@ -105,7 +105,65 @@ describe("resolveAction", () => {
         };
         assert.throws(
             () => resolveAction(dup, WEB_AND_API, "run", "dup"),
-            /defined by more than one repo.*rename one/s,
+            /defined by more than one member.*rename one/s,
+        );
+    });
+});
+
+describe("resolveAction (apps)", () => {
+    function appCfg(): MultreeConfig {
+        return {
+            version: 1,
+            repos: { api: { path: "/src/api", commands: { api: { run: "go run ." } } } },
+            apps: {
+                mc: {
+                    run: "mc-serve",
+                    commands: { logs: "mc-logs" },
+                    env: { PORT: "{mc.http_port}" },
+                },
+            },
+        };
+    }
+    const WITH_APP = group({ api: member("api", "/wt/api"), mc: member("mc", "/wt/mc") });
+
+    it("resolves an app's run verb to its command, scratchpad cwd, and env template", () => {
+        assert.deepEqual(resolveAction(appCfg(), WITH_APP, "run", "mc"), {
+            repo: "mc",
+            target: "mc",
+            action: "run",
+            command: "mc-serve",
+            cwd: "/wt/mc",
+            envTemplate: { PORT: "{mc.http_port}" },
+        });
+    });
+
+    it("resolves an app's non-run command verb in the scratchpad", () => {
+        const r = resolveAction(appCfg(), WITH_APP, "logs", "mc");
+        assert.equal(r.command, "mc-logs");
+        assert.equal(r.cwd, "/wt/mc");
+    });
+
+    it("throws when an app has no such verb, listing its verbs", () => {
+        assert.throws(
+            () => resolveAction(appCfg(), WITH_APP, "ghost", "mc"),
+            /App "mc" has no action "ghost"\. Available: logs, run/,
+        );
+    });
+
+    it("ignores an app target when the app is not a member of the group", () => {
+        assert.throws(() => resolveAction(appCfg(), API_ONLY, "run", "mc"), /No target "mc"/);
+    });
+
+    it("throws when a repo command target and an app share a name", () => {
+        const dup: MultreeConfig = {
+            version: 1,
+            repos: { web: { path: "/src/web", commands: { mc: { run: "repo-cmd" } } } },
+            apps: { mc: { run: "app-cmd" } },
+        };
+        const g = group({ web: member("web", "/wt/web"), mc: member("mc", "/wt/mc") });
+        assert.throws(
+            () => resolveAction(dup, g, "run", "mc"),
+            /defined by more than one member.*rename one/s,
         );
     });
 });

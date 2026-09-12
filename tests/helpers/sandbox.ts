@@ -11,11 +11,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { stringify } from "yaml";
 import type {
+    ActionSpec,
+    AppConfig,
+    ClaudeWorkspaceConfig,
     ConsumeSpec,
     ExposeSpec,
     GroupState,
     HookSpec,
     MainCheckoutAction,
+    McpServerSpec,
     MultreeConfig,
     PrimeArtifactSpec,
     TargetSpec,
@@ -61,8 +65,27 @@ export interface FakeRepoSpec {
     primeArtifacts?: PrimeArtifactSpec[];
 }
 
+// A non-repo `app` member for the manifest. No git fixture is created — an app
+// is just a scratchpad dir at run time — so this is a thin manifest shape.
+export interface FakeAppSpec {
+    key: string;
+    variables?: Record<string, VariableSpec>;
+    exposes?: Record<string, ExposeSpec>;
+    consumes?: ConsumeSpec | ConsumeSpec[];
+    defaults?: Record<string, string | number>;
+    env?: Record<string, string>;
+    run?: string | string[];
+    commands?: Record<string, ActionSpec>;
+    mcps?: Record<string, McpServerSpec>;
+    dependsOn?: string[];
+    setup?: HookSpec;
+    teardown?: HookSpec;
+}
+
 export interface SandboxOptions {
     repos: FakeRepoSpec[];
+    // Non-repo process members (sidecars). Optional.
+    apps?: FakeAppSpec[];
     // Manifest-level config knobs. Useful for asserting that the
     // top-level defaults flow through when no per-repo override is set.
     updateStrategy?: "rebase" | "merge";
@@ -75,6 +98,8 @@ export interface SandboxOptions {
     // the manifest verbatim, so tests can also pass invalid values (unknown
     // keys, empties, duplicates) to exercise config-load validation.
     defaultInclude?: string[];
+    // Opt-in group-root conveniences (hoist member .mcp.json, additionalDirectories).
+    claudeWorkspace?: ClaudeWorkspaceConfig;
 }
 
 // Rich per-profile handle. Returned by `createMultiProfileSandbox().profile(name)`
@@ -220,6 +245,35 @@ function buildRepoMap(specs: FakeRepoSpec[], reposRoot: string): MultreeConfig["
     return repos;
 }
 
+function buildAppMap(specs: FakeAppSpec[] | undefined): MultreeConfig["apps"] {
+    if (!specs || specs.length === 0) {
+        return undefined;
+    }
+    const apps: NonNullable<MultreeConfig["apps"]> = {};
+    for (const spec of specs) {
+        const hooks: NonNullable<AppConfig["hooks"]> = {};
+        if (spec.setup) {
+            hooks.setup = spec.setup;
+        }
+        if (spec.teardown) {
+            hooks.teardown = spec.teardown;
+        }
+        apps[spec.key] = {
+            variables: spec.variables,
+            exposes: spec.exposes,
+            consumes: spec.consumes,
+            defaults: spec.defaults,
+            env: spec.env,
+            run: spec.run,
+            commands: spec.commands,
+            mcps: spec.mcps,
+            depends_on: spec.dependsOn,
+            hooks: Object.keys(hooks).length > 0 ? hooks : undefined,
+        };
+    }
+    return apps;
+}
+
 interface SandboxRoot {
     root: string;
     home: string;
@@ -274,6 +328,7 @@ function createProfileFixture(
         version: 1,
         worktree_root: worktreeRoot,
         repos,
+        apps: buildAppMap(opts.apps),
         tools: opts.tools,
         update_strategy: opts.updateStrategy,
         main_checkout_action: opts.mainCheckoutAction,
@@ -281,6 +336,7 @@ function createProfileFixture(
         parallel_setup: opts.parallelSetup,
         hook_timeout: opts.hookTimeout,
         default_include: opts.defaultInclude,
+        claude_workspace: opts.claudeWorkspace,
     };
     const manifestPath = join(home, `${name}.yaml`);
     writeFileSync(manifestPath, stringify(config));

@@ -232,7 +232,7 @@ describe("loadConfig", () => {
             join(home, "default.yaml"),
             "version: 1\nrepos:\n  api:\n    path: /tmp/api\n  frontend:\n    path: /tmp/frontend\n    depends_on: [ghost]\n",
         );
-        assert.throws(() => loadConfig(), /depends_on unknown repo "ghost"/);
+        assert.throws(() => loadConfig(), /depends_on unknown member "ghost"/);
     });
 
     it("rejects depends_on pointing at the repo itself", () => {
@@ -376,7 +376,7 @@ describe("loadConfig", () => {
         writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, ghost]\n`);
         assert.throws(
             () => loadConfig(),
-            /default_include lists unknown repo "ghost"\. Available: api, frontend/,
+            /default_include lists unknown member "ghost"\. Available: api, frontend/,
         );
     });
 
@@ -392,12 +392,181 @@ describe("loadConfig", () => {
 
     it("rejects a non-string default_include entry", () => {
         writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, 7]\n`);
-        assert.throws(() => loadConfig(), /default_include entries must be non-empty repo keys/);
+        assert.throws(() => loadConfig(), /default_include entries must be non-empty member keys/);
     });
 
     it("accepts a valid default_include", () => {
         writeFileSync(join(home, "default.yaml"), `${TWO_REPOS}default_include: [api, frontend]\n`);
         const { config } = loadConfig();
         assert.deepEqual(config.default_include, ["api", "frontend"]);
+    });
+
+    // ---- apps ----
+
+    const APP_OK =
+        "version: 1\n" +
+        "repos:\n  api:\n    path: /tmp/api\n" +
+        "apps:\n" +
+        "  mailcatcher:\n" +
+        "    run: some-cli\n" +
+        "    variables:\n      http_port: { type: number, min: 8200, max: 8249 }\n" +
+        '    env:\n      PORT: "{mailcatcher.http_port}"\n' +
+        "    mcps:\n      mailcatcher:\n        type: http\n" +
+        '        url: "http://localhost:{mailcatcher.http_port}/mcp"\n';
+
+    it("accepts and loads an apps block with variables, env, and mcps", () => {
+        writeFileSync(join(home, "default.yaml"), APP_OK);
+        const { config } = loadConfig();
+        assert.equal(config.apps?.mailcatcher.run, "some-cli");
+        assert.equal(config.apps?.mailcatcher.env?.PORT, "{mailcatcher.http_port}");
+        assert.equal(config.apps?.mailcatcher.mcps?.mailcatcher.type, "http");
+    });
+
+    it("rejects an app whose name collides with a repo", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  api:\n    run: x\n",
+        );
+        assert.throws(() => loadConfig(), /App "api" collides with a repo/);
+    });
+
+    it("rejects an app depends_on an unknown member", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    depends_on: [ghost]\n",
+        );
+        assert.throws(() => loadConfig(), /depends_on unknown member "ghost"/);
+    });
+
+    it("accepts an app depends_on a repo and an app in default_include", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    depends_on: [api]\ndefault_include: [api, mc]\n",
+        );
+        const { config } = loadConfig();
+        assert.deepEqual(config.default_include, ["api", "mc"]);
+    });
+
+    it("rejects an http mcp server without a url", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\n    mcps:\n      s:\n        type: http\n",
+        );
+        assert.throws(() => loadConfig(), /an http server requires a non-empty "url"/);
+    });
+
+    it("rejects an app env value that is not a string", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    env:\n      PORT: 8200\n",
+        );
+        assert.throws(() => loadConfig(), /env "PORT" must be a string/);
+    });
+
+    it("rejects a 'run' verb inside an app's commands", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      run: y\n",
+        );
+        assert.throws(() => loadConfig(), /"run" is the app's primary verb/);
+    });
+
+    // ---- claude_workspace ----
+
+    it("rejects a claude_workspace that is not a map", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\nclaude_workspace: true\n",
+        );
+        assert.throws(() => loadConfig(), /claude_workspace must be a map/);
+    });
+
+    it("rejects a non-boolean claude_workspace.hoist_member_mcps", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\nclaude_workspace:\n  hoist_member_mcps: 3\n",
+        );
+        assert.throws(() => loadConfig(), /claude_workspace\.hoist_member_mcps must be a boolean/);
+    });
+
+    it("rejects a non-boolean claude_workspace.additional_directories", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\nclaude_workspace:\n  additional_directories: "yep"\n',
+        );
+        assert.throws(
+            () => loadConfig(),
+            /claude_workspace\.additional_directories must be a boolean/,
+        );
+    });
+
+    it("accepts a valid claude_workspace block", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\nclaude_workspace:\n  hoist_member_mcps: true\n  additional_directories: true\n",
+        );
+        const { config } = loadConfig();
+        assert.equal(config.claude_workspace?.hoist_member_mcps, true);
+        assert.equal(config.claude_workspace?.additional_directories, true);
+    });
+
+    // ---- mcps shapes ----
+
+    it("rejects an mcp server missing its type", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\n    mcps:\n      s:\n        url: "http://localhost:1/mcp"\n',
+        );
+        assert.throws(() => loadConfig(), /"type" is required/);
+    });
+
+    it("rejects an mcps block that is not a map", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\n    mcps: true\n",
+        );
+        assert.throws(() => loadConfig(), /mcps must be a map/);
+    });
+
+    it("rejects an mcp server spec that is not an object", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\n    mcps:\n      s: nope\n",
+        );
+        assert.throws(() => loadConfig(), /mcp server "s": must be an object/);
+    });
+
+    it("rejects an mcp server with an invalid name", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            'version: 1\nrepos:\n  api:\n    path: /tmp/api\n    mcps:\n      "bad name":\n        type: http\n        url: "http://x/mcp"\n',
+        );
+        assert.throws(() => loadConfig(), /mcp server "bad name": invalid name/);
+    });
+
+    // ---- app commands validation ----
+
+    it("rejects an app command verb that shadows a builtin subcommand", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      list: mc-list\n",
+        );
+        assert.throws(() => loadConfig(), /shadows the built-in subcommand "list"/);
+    });
+
+    it("rejects an app command verb that collides with a tool name", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\ntools:\n  open:\n    command: code\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      open: mc-open\n",
+        );
+        assert.throws(() => loadConfig(), /collides with the tool "open"/);
+    });
+
+    it("rejects an app command verb using the reserved cwd key", () => {
+        writeFileSync(
+            join(home, "default.yaml"),
+            "version: 1\nrepos:\n  api:\n    path: /tmp/api\napps:\n  mc:\n    run: x\n    commands:\n      cwd: nope\n",
+        );
+        assert.throws(() => loadConfig(), /"cwd" is reserved and is not a verb/);
     });
 });

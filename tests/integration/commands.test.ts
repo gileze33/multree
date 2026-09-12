@@ -129,6 +129,6 @@ describe("repo command dispatch: target name collisions", () => {
         runMultree(sb, ["create", "dup", "--include", "client,other"]);
         const r = runMultree(sb, ["run", "dup", "north"]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /defined by more than one repo.*rename one/s);
+        assert.match(r.stderr, /defined by more than one member.*rename one/s);
     });
 });

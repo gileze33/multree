@@ -21,6 +21,17 @@ export interface ConsumeSpec {
     upsert: Record<string, string>;
 }
 
+// A single MCP server contributed by a member (repo or app) to the merged
+// group-root `.mcp.json` under `mcpServers`. `type` (and, for http, `url`) are
+// the meaningful fields; any extra keys (e.g. `headers`) are preserved verbatim
+// into the JSON. String values may carry `{member.key}` wiring tokens, resolved
+// when the group is wired.
+export interface McpServerSpec {
+    type: string;
+    url?: string;
+    [key: string]: unknown;
+}
+
 // A repo-scoped variable that multree generates and allocates a value for when
 // the repo joins a group. Allocated values are exposed automatically to the
 // wiring context as `{<repo>.<name>}` (no `exposes` declaration needed), so
@@ -85,6 +96,9 @@ export interface RepoConfig {
     // automatically as `{<repo>.<name>}`, alongside any `exposes`/`defaults`.
     variables?: Record<string, VariableSpec>;
     consumes?: ConsumeSpec | ConsumeSpec[];
+    // MCP servers this repo contributes to the group-root `.mcp.json` (merged
+    // with every other member's `mcps`; see McpServerSpec and json.ts).
+    mcps?: Record<string, McpServerSpec>;
     defaults?: Record<string, string | number>;
     // Repo-scoped runnable commands. Each key is a target (e.g. a monorepo
     // package); each target maps action verbs to commands. See TargetSpec.
@@ -105,6 +119,44 @@ export interface RepoConfig {
     // environment via the usual wiring. Cycles are rejected at validation.
     depends_on?: string[];
 }
+
+// An `app` is a group member with no source tree: a sidecar process (a mail
+// sink, a mock service, a tunnel) run from a published binary rather than
+// checked out and developed. It participates in the variables / exposes /
+// consumes / mcps wiring exactly like a repo, but is backed by a per-group
+// scratchpad directory (<worktree_root>/<group>/<app-name>/) instead of a git
+// worktree, and is launched from `run` (with `env` injected) rather than
+// prime/install/build hooks.
+export interface AppConfig {
+    variables?: Record<string, VariableSpec>;
+    exposes?: Record<string, ExposeSpec>;
+    consumes?: ConsumeSpec | ConsumeSpec[];
+    mcps?: Record<string, McpServerSpec>;
+    defaults?: Record<string, string | number>;
+    // Templated env injected into the process when the app runs. Unlike a repo's
+    // file-based `consumes`, multree launches the process itself, so it sets
+    // these directly in the child environment — no dotfile is written.
+    env?: Record<string, string>;
+    // The app's primary command, dispatched as `multree run <group> <app>`.
+    run?: string | string[];
+    // Optional extra verbs on the app target; each is `multree <verb> <group>
+    // <app>`. The reserved verb `run` comes from `run` above.
+    commands?: Record<string, ActionSpec>;
+    depends_on?: string[];
+    // Apps have no source tree to prime or dependencies to install, so only the
+    // setup/teardown phases (run in the scratchpad) apply.
+    hooks?: {
+        setup?: HookSpec;
+        teardown?: HookSpec;
+        timeout?: string | number;
+    };
+}
+
+// The shared shape the wiring / variables machinery reads: repos and apps are
+// both "members". Only fields present on both kinds are reachable through the
+// union, which is exactly the wiring surface (variables/exposes/consumes/
+// defaults/mcps/commands/depends_on/hooks).
+export type MemberConfig = RepoConfig | AppConfig;
 
 export interface ToolConfig {
     // Shell string ("code {cwd}") or argv array (["code", "{cwd}"]).
@@ -162,10 +214,32 @@ export interface CmuxConfig {
     panes?: Record<string, CmuxPaneKind | CmuxPaneKind[]>;
 }
 
+// Opt-in conveniences for a `multree claude <group>` session opened at the group
+// root. Both default off (block absent = no change). Neither touches workspace
+// trust or MCP approval state (~/.claude.json); they only make servers and files
+// discoverable, which still requires the folder to be trusted to take effect.
+export interface ClaudeWorkspaceConfig {
+    // Fold each repo member's own checked-in `.mcp.json` servers into the merged
+    // group-root `.mcp.json`. Claude only discovers `.mcp.json` at the launch dir
+    // (plus user/managed scopes), never in subdirectories, so without this a
+    // sub-repo's servers are invisible from the group root.
+    hoist_member_mcps?: boolean;
+    // Write a group-root `.claude/settings.json` whose
+    // `permissions.additionalDirectories` lists each repo member's worktree.
+    // Inherited folder-trust excludes nested git repos, so this grants the
+    // session file access to the sibling repo worktrees (it does NOT load their
+    // `.mcp.json` — that is what hoist_member_mcps is for).
+    additional_directories?: boolean;
+}
+
 export interface MultreeConfig {
     version: 1;
     worktree_root?: string;
     repos: Record<string, RepoConfig>;
+    // Non-repo process members (sidecars). See AppConfig. Optional.
+    apps?: Record<string, AppConfig>;
+    // Opt-in group-root conveniences for `multree claude`. See ClaudeWorkspaceConfig.
+    claude_workspace?: ClaudeWorkspaceConfig;
     tools?: Record<string, ToolConfig>;
     // Optional cmux integration. Its presence (inside cmux) is the opt-in; see
     // CmuxConfig. Absent = multree never touches cmux.
@@ -199,6 +273,10 @@ export type PhaseStatus = "done" | "failed";
 
 export interface MemberState {
     repo: string;
+    // "app" for a non-repo process member (a scratchpad dir, no git); absent or
+    // "repo" for a git-worktree member. Lets create/destroy/status/list skip git
+    // for apps.
+    kind?: "repo" | "app";
     path: string;
     // Branch this member's worktree is on. Older state files predate this
     // field; consumers fall back to GroupState.branch when it's absent.
@@ -219,6 +297,14 @@ export interface GroupState {
     branch: string;
     created_at: string;
     members: Record<string, MemberState>;
+    // Server names multree owns in the group-root `.mcp.json` (contributed by
+    // members' `mcps` blocks). Tracked so rewire updates them in place and
+    // remove/destroy delete only what multree wrote, preserving hand-added keys.
+    mcp_servers?: string[];
+    // Absolute directories multree added to the group-root
+    // `.claude/settings.json` `permissions.additionalDirectories`. Tracked so
+    // rewire syncs the set and foreign (user-added) entries are preserved.
+    additional_directories?: string[];
     // The cmux workspace opened for this group, if any. Stored as a stable
     // workspace UUID so teardown works from a later session. Set by `create`
     // (when cmux is enabled) or `multree cmux up`; cleared by `multree cmux down`.

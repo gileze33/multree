@@ -6,10 +6,14 @@ import { SUBCOMMANDS } from "./completion.ts";
 import { detectCycle } from "./scheduler.ts";
 import type {
     ActionSpec,
+    AppConfig,
     MainCheckoutAction,
+    McpServerSpec,
+    MemberConfig,
     MultreeConfig,
     RepoConfig,
     UpdateStrategy,
+    VariableSpec,
 } from "./types.ts";
 
 export const DEFAULT_PROFILE = "default";
@@ -173,12 +177,145 @@ function validate(cfg: MultreeConfig): void {
         if (!repo.path) {
             throw new Error(`Repo "${name}" is missing required field: path`);
         }
-        validateVariables(name, repo);
+        validateVariables(`Repo "${name}"`, repo.variables);
         validateCommands(name, repo, cfg);
+        validateMcps(`Repo "${name}"`, repo.mcps);
     }
+    validateApps(cfg);
     validateDependsOn(cfg);
     validateDefaultInclude(cfg);
     validateCmux(cfg);
+    validateClaudeWorkspace(cfg);
+}
+
+function validateClaudeWorkspace(cfg: MultreeConfig): void {
+    const c = cfg.claude_workspace;
+    if (c === undefined) {
+        return;
+    }
+    if (typeof c !== "object" || c === null || Array.isArray(c)) {
+        throw new Error("claude_workspace must be a map (e.g. { hoist_member_mcps: true })");
+    }
+    for (const key of ["hoist_member_mcps", "additional_directories"] as const) {
+        if (c[key] !== undefined && typeof c[key] !== "boolean") {
+            throw new Error(`claude_workspace.${key} must be a boolean`);
+        }
+    }
+}
+
+// Look up a member's config by name — a repo, else an app. Validation guarantees
+// a name is never in both, so repos-first is unambiguous.
+export function memberConfig(cfg: MultreeConfig, name: string): MemberConfig | undefined {
+    return cfg.repos[name] ?? cfg.apps?.[name];
+}
+
+// True iff `name` is an app member (and not a repo).
+export function isAppName(cfg: MultreeConfig, name: string): boolean {
+    return cfg.apps?.[name] !== undefined && cfg.repos[name] === undefined;
+}
+
+// Every declared member name — repos then apps.
+export function memberNames(cfg: MultreeConfig): string[] {
+    return [...Object.keys(cfg.repos), ...Object.keys(cfg.apps ?? {})];
+}
+
+// Member names share the wiring template's `{member.key}` character class (no
+// dot, which is the key separator) so an app name is always referenceable.
+const MEMBER_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
+function validateApps(cfg: MultreeConfig): void {
+    if (cfg.apps === undefined) {
+        return;
+    }
+    if (typeof cfg.apps !== "object" || cfg.apps === null || Array.isArray(cfg.apps)) {
+        throw new Error("apps must be a map of app name -> app config");
+    }
+    for (const [name, app] of Object.entries(cfg.apps)) {
+        if (!MEMBER_NAME_RE.test(name)) {
+            throw new Error(
+                `App "${name}": invalid name (alphanumerics, underscore, hyphen only)`,
+            );
+        }
+        if (cfg.repos[name]) {
+            throw new Error(
+                `App "${name}" collides with a repo of the same name; member names must be unique`,
+            );
+        }
+        validateVariables(`App "${name}"`, app.variables);
+        validateAppCommands(name, app, cfg);
+        validateMcps(`App "${name}"`, app.mcps);
+        validateAppEnv(name, app.env);
+        if (app.run !== undefined) {
+            validateActionCommand(`App "${name}" run`, app.run);
+        }
+    }
+}
+
+function validateAppCommands(appName: string, app: AppConfig, cfg: MultreeConfig): void {
+    if (!app.commands) {
+        return;
+    }
+    const builtins = new Set<string>(SUBCOMMANDS);
+    const toolNames = new Set(Object.keys(cfg.tools ?? {}));
+    for (const [verb, spec] of Object.entries(app.commands)) {
+        const where = `App "${appName}" command verb "${verb}"`;
+        if (!COMMAND_NAME_RE.test(verb)) {
+            throw new Error(`${where}: invalid name (alphanumerics, dot, underscore, hyphen only)`);
+        }
+        if (verb === "run") {
+            throw new Error(
+                `${where}: "run" is the app's primary verb; set it via the app's \`run\` field, not \`commands\``,
+            );
+        }
+        if (verb === RESERVED_TARGET_KEY) {
+            throw new Error(`${where}: "cwd" is reserved and is not a verb`);
+        }
+        if (builtins.has(verb)) {
+            throw new Error(`${where}: shadows the built-in subcommand "${verb}"; rename it`);
+        }
+        if (toolNames.has(verb)) {
+            throw new Error(`${where}: collides with the tool "${verb}"; rename it`);
+        }
+        validateActionCommand(where, spec);
+    }
+}
+
+function validateAppEnv(appName: string, env: Record<string, string> | undefined): void {
+    if (env === undefined) {
+        return;
+    }
+    if (typeof env !== "object" || env === null || Array.isArray(env)) {
+        throw new Error(`App "${appName}" env must be a map of string -> string`);
+    }
+    for (const [k, v] of Object.entries(env)) {
+        if (typeof v !== "string") {
+            throw new Error(`App "${appName}" env "${k}" must be a string (got ${typeof v})`);
+        }
+    }
+}
+
+function validateMcps(label: string, mcps: Record<string, McpServerSpec> | undefined): void {
+    if (mcps === undefined) {
+        return;
+    }
+    if (typeof mcps !== "object" || mcps === null || Array.isArray(mcps)) {
+        throw new Error(`${label} mcps must be a map of server name -> server spec`);
+    }
+    for (const [name, spec] of Object.entries(mcps)) {
+        const where = `${label} mcp server "${name}"`;
+        if (!COMMAND_NAME_RE.test(name)) {
+            throw new Error(`${where}: invalid name (alphanumerics, dot, underscore, hyphen only)`);
+        }
+        if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+            throw new Error(`${where}: must be an object`);
+        }
+        if (typeof spec.type !== "string" || spec.type.trim() === "") {
+            throw new Error(`${where}: "type" is required (e.g. "http")`);
+        }
+        if (spec.type === "http" && (typeof spec.url !== "string" || spec.url.trim() === "")) {
+            throw new Error(`${where}: an http server requires a non-empty "url"`);
+        }
+    }
 }
 
 const CMUX_PANE_KINDS = new Set(["service", "shell", "skip"]);
@@ -302,12 +439,15 @@ function validateActionCommand(where: string, value: ActionSpec | undefined): vo
 // `{<repo>.<key>}` form, so an allocated value is always referenceable.
 const VARIABLE_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
-function validateVariables(repoName: string, repo: RepoConfig): void {
-    if (!repo.variables) {
+function validateVariables(
+    label: string,
+    variables: Record<string, VariableSpec> | undefined,
+): void {
+    if (!variables) {
         return;
     }
-    for (const [varName, spec] of Object.entries(repo.variables)) {
-        const where = `Repo "${repoName}" variable "${varName}"`;
+    for (const [varName, spec] of Object.entries(variables)) {
+        const where = `${label} variable "${varName}"`;
         if (!VARIABLE_NAME_RE.test(varName)) {
             throw new Error(
                 `${where}: invalid name (alphanumerics, underscore, hyphen only)`,
@@ -331,21 +471,25 @@ function validateVariables(repoName: string, repo: RepoConfig): void {
 }
 
 function validateDependsOn(cfg: MultreeConfig): void {
-    const known = Object.keys(cfg.repos);
+    // depends_on may cross the repo/app boundary in either direction, so the
+    // known set and the cycle check span every member.
+    const known = memberNames(cfg);
+    const knownSet = new Set(known);
     const depsOf: Record<string, string[]> = {};
-    for (const [name, repo] of Object.entries(cfg.repos)) {
-        if (!repo.depends_on) {
+    for (const name of known) {
+        const deps = memberConfig(cfg, name)?.depends_on;
+        if (!deps) {
             continue;
         }
-        for (const dep of repo.depends_on) {
-            if (!cfg.repos[dep]) {
-                throw new Error(`Repo "${name}" depends_on unknown repo "${dep}"`);
+        for (const dep of deps) {
+            if (!knownSet.has(dep)) {
+                throw new Error(`Member "${name}" depends_on unknown member "${dep}"`);
             }
             if (dep === name) {
-                throw new Error(`Repo "${name}" depends_on itself`);
+                throw new Error(`Member "${name}" depends_on itself`);
             }
         }
-        depsOf[name] = repo.depends_on;
+        depsOf[name] = deps;
     }
     const cycle = detectCycle(known, depsOf);
     if (cycle) {
@@ -361,23 +505,23 @@ function validateDefaultInclude(cfg: MultreeConfig): void {
         return;
     }
     if (!Array.isArray(cfg.default_include) || cfg.default_include.length === 0) {
-        throw new Error("default_include must be a non-empty list of repo keys");
+        throw new Error("default_include must be a non-empty list of member keys");
     }
     const seen = new Set<string>();
-    for (const repo of cfg.default_include) {
-        if (typeof repo !== "string" || repo.trim() === "") {
-            throw new Error("default_include entries must be non-empty repo keys");
+    for (const name of cfg.default_include) {
+        if (typeof name !== "string" || name.trim() === "") {
+            throw new Error("default_include entries must be non-empty member keys");
         }
-        if (!cfg.repos[repo]) {
+        if (!memberConfig(cfg, name)) {
             throw new Error(
-                `default_include lists unknown repo "${repo}". ` +
-                    `Available: ${Object.keys(cfg.repos).join(", ")}`,
+                `default_include lists unknown member "${name}". ` +
+                    `Available: ${memberNames(cfg).join(", ")}`,
             );
         }
-        if (seen.has(repo)) {
-            throw new Error(`default_include lists "${repo}" more than once`);
+        if (seen.has(name)) {
+            throw new Error(`default_include lists "${name}" more than once`);
         }
-        seen.add(repo);
+        seen.add(name);
     }
 }
 

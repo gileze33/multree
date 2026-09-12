@@ -90,6 +90,25 @@ tools:
 #         api: [service, shell]   # run the dev server AND open a worktree shell
 #         frontend: shell         # just a shell, even though it has a run target
 
+# Optional conveniences for a `multree claude <group>` session opened at the
+# group root. Both default off. They write only inside the group dir (and the
+# group-root .mcp.json) -- never ~/.claude.json, workspace trust, or MCP
+# approvals -- so, like any project settings, they take effect only once the
+# group root is trusted (trust the worktree_root once: `cd <worktree_root> && claude`).
+# claude_workspace:
+#     # Fold each repo member's own checked-in .mcp.json servers into the merged
+#     # group-root .mcp.json. Claude discovers .mcp.json only at the launch dir
+#     # (plus user/managed scopes), never in subdirectories, so a sub-repo's
+#     # servers are otherwise invisible from the group root. A hoisted stdio
+#     # server's relative command is absolutized against its worktree.
+#     hoist_member_mcps: true
+#     # Write a group-root .claude/settings.json whose
+#     # permissions.additionalDirectories lists each repo member's worktree.
+#     # Inherited folder-trust excludes nested git repos, so this grants the
+#     # session file access to the sibling worktrees. (It grants file access
+#     # only; it does NOT load their .mcp.json -- that is hoist_member_mcps.)
+#     additional_directories: true
+
 repos:
     # Pick any short, stable key. Used on the CLI: `--include api,frontend`.
     api:
@@ -193,3 +212,36 @@ repos:
     #         - file: packages/app-two/.env
     #           upsert:
     #               REACT_APP_API_URL: "http://localhost:{api.port}"
+
+# Non-repo process members: sidecars you run from a published binary (a mail
+# sink, a mock service, a tunnel), not checked out and developed. An app has no
+# git worktree; multree gives it a per-group scratchpad dir
+# (<worktree_root>/<group>/<app>/) as its cwd and launches it from `run`. It
+# joins the same variables / exposes / consumes / mcps wiring as a repo, and is
+# selected the same way -- `--include api,mailcatcher`, or via default_include.
+# Two app-only conveniences: because multree launches the process itself, `env`
+# is injected directly (no dotfile to write and source), and every member gets a
+# built-in `{<member>.included}` token ("true" when in the group, "" otherwise)
+# so a repo can auto-wire to a sidecar only when it's present -- e.g. a repo's
+# consumes could set `SMTP_ENABLED: "{mailcatcher.included}"`.
+# apps:
+#     mailcatcher:
+#         # depends_on a repo so its exposes (e.g. {api.port}) are resolved first.
+#         depends_on: [api]
+#         variables:
+#             http_port: { type: number, min: 8200, max: 8249, default: 8025 }
+#             smtp_port: { type: number, min: 1100, max: 1149, default: 1025 }
+#         # Templated env injected straight into the process (same {member.key}
+#         # tokens as consumes) -- no file is written.
+#         env:
+#             PORT: "{mailcatcher.http_port}"
+#             SMTP_PORT: "{mailcatcher.smtp_port}"
+#             RELAY_URL: "http://localhost:{api.port}/inbound"
+#             DATA_DIR: "./data"          # relative to the scratchpad cwd
+#         run: some-mailcatcher-cli        # multree run <group> mailcatcher
+#         # Contribute an MCP server to the merged group-root .mcp.json (all
+#         # members' `mcps` are deep-merged under `mcpServers`, keyed by name).
+#         mcps:
+#             mailcatcher:
+#                 type: http
+#                 url: "http://localhost:{mailcatcher.http_port}/mcp"

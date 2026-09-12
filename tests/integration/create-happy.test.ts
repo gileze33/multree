@@ -146,7 +146,7 @@ describe("create with default_include", () => {
 
         const r = runMultree(sb, ["list"]);
         assert.notEqual(r.status, 0);
-        assert.match(r.stderr, /default_include lists unknown repo "phantom"/);
+        assert.match(r.stderr, /default_include lists unknown member "phantom"/);
     });
 });
 

@@ -12,7 +12,7 @@ export function showCommand(name: string): void {
     console.log(`Created: ${group.created_at}`);
     console.log("");
     for (const [repoName, member] of Object.entries(group.members)) {
-        console.log(`  ${repoName}`);
+        console.log(`  ${repoName}${member.kind === "app" ? " (app)" : ""}`);
         console.log(`    path: ${member.path}`);
         for (const [k, v] of Object.entries(member.variables ?? {})) {
             console.log(`    variables.${k} = ${v}`);
