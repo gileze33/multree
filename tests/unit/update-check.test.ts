@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { compareSemver } from "../../src/update-check.ts";
+import { compareSemver, detectPackageManager } from "../../src/update-check.ts";
 
 describe("compareSemver", () => {
     it("returns positive when a is newer than b", () => {
@@ -43,6 +43,59 @@ describe("compareSemver", () => {
         assert.equal(compareSemver("", "1.2.3"), 0);
         assert.equal(compareSemver("1.x.0", "1.2.0"), 0);
         assert.equal(compareSemver("1.-1.0", "1.0.0"), 0);
+    });
+});
+
+describe("detectPackageManager", () => {
+    it("detects pnpm from a global store path", () => {
+        assert.equal(
+            detectPackageManager(
+                "/Users/x/Library/pnpm/global/5/.pnpm/multree-cli@0.11.1/node_modules/multree-cli/dist/cli.mjs",
+            ),
+            "pnpm",
+        );
+    });
+
+    it("detects bun from a global install path", () => {
+        assert.equal(
+            detectPackageManager("/Users/x/.bun/install/global/node_modules/multree-cli/dist/cli.mjs"),
+            "bun",
+        );
+    });
+
+    it("detects yarn from a global install path", () => {
+        assert.equal(
+            detectPackageManager(
+                "/Users/x/.config/yarn/global/node_modules/multree-cli/dist/cli.mjs",
+            ),
+            "yarn",
+        );
+    });
+
+    it("falls back to npm for a plain lib/node_modules path", () => {
+        assert.equal(
+            detectPackageManager("/usr/local/lib/node_modules/multree-cli/dist/cli.mjs"),
+            "npm",
+        );
+        assert.equal(
+            detectPackageManager(
+                "/Users/x/.nvm/versions/node/v22.0.0/lib/node_modules/multree-cli/dist/cli.mjs",
+            ),
+            "npm",
+        );
+    });
+
+    it("falls back to npm for an unresolvable (empty) path", () => {
+        assert.equal(detectPackageManager(""), "npm");
+    });
+
+    it("normalises Windows-style separators before matching", () => {
+        assert.equal(
+            detectPackageManager(
+                "C:\\Users\\x\\AppData\\Local\\pnpm\\global\\5\\.pnpm\\multree-cli@0.11.1\\node_modules\\multree-cli\\dist\\cli.mjs",
+            ),
+            "pnpm",
+        );
     });
 });
 

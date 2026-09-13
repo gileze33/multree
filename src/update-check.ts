@@ -127,6 +127,46 @@ export function compareSemver(a: string, b: string): number {
     return 0;
 }
 
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+const UPGRADE_COMMAND: Record<PackageManager, string> = {
+    npm: `npm i -g ${PACKAGE_NAME}@latest`,
+    pnpm: `pnpm add -g ${PACKAGE_NAME}@latest`,
+    yarn: `yarn global add ${PACKAGE_NAME}@latest`,
+    bun: `bun add -g ${PACKAGE_NAME}@latest`,
+};
+
+// Infer which package manager installed this CLI from the path the running
+// module resolves to, so the upgrade hint matches how the user actually
+// installed it. Global-install layouts each carry a distinctive path segment:
+// pnpm keeps packages under a `.pnpm/` store, bun under `.bun/`, yarn global
+// under a `yarn/` dir. Anything else — including npm's plain
+// `lib/node_modules` — is treated as npm. Only ever used to tailor the hint,
+// so a wrong guess is cosmetic.
+export function detectPackageManager(modulePath: string): PackageManager {
+    const p = modulePath.replace(/\\/g, "/");
+    if (/\/\.?pnpm\//.test(p)) {
+        return "pnpm";
+    }
+    if (/\/\.bun\//.test(p)) {
+        return "bun";
+    }
+    if (/\/\.?yarn\//.test(p)) {
+        return "yarn";
+    }
+    return "npm";
+}
+
+function upgradeCommand(): string {
+    let modulePath = "";
+    try {
+        modulePath = fileURLToPath(import.meta.url);
+    } catch {
+        // Can't resolve our own path; fall back to the npm hint below.
+    }
+    return UPGRADE_COMMAND[detectPackageManager(modulePath)];
+}
+
 // Synchronous: read the cache and print a one-line notice if a newer
 // version is available. Never throws.
 export function notifyIfNewer(installed: string): void {
@@ -144,7 +184,7 @@ export function notifyIfNewer(installed: string): void {
     const tag = useColor ? "[33m[multree][0m" : "[multree]";
     process.stderr.write(
         `${tag} new version available: ${installed} → ${cache.latest} ` +
-            `(run: npm i -g ${PACKAGE_NAME}@latest)\n`,
+            `(run: ${upgradeCommand()})\n`,
     );
 }
 

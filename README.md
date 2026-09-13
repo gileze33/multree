@@ -244,6 +244,8 @@ multree checks the npm registry every few hours for a newer published version an
 [multree] new version available: 0.1.1 → 0.2.0 (run: npm i -g multree-cli@latest)
 ```
 
+The `run:` hint matches the package manager you installed multree with — inferred from the install path, so pnpm, yarn and bun global installs get `pnpm add -g` / `yarn global add` / `bun add -g` respectively rather than always `npm i -g`.
+
 The check is **notify-only** — multree never auto-updates itself. The actual registry fetch happens in a detached background process so it never adds latency to your command. The result is cached in `$XDG_CACHE_HOME/multree/version-check.json` (or `~/.cache/multree/version-check.json`).
 
 The notice is suppressed when any of the following is true:
