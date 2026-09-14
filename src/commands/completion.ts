@@ -1,3 +1,6 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { collectActionVerbs } from "../actions.ts";
 import { loadAliases, loadConfig, resolveMultreeHome, setProfileFromFlag } from "../config.ts";
 import {
@@ -10,9 +13,14 @@ import {
 import { listGroups } from "../state.ts";
 import { listProfileFiles } from "./profile.ts";
 
-// `multree completion <bash|zsh>` — print the wrapper script for the named shell.
+// `multree completion <bash|zsh>` — print the wrapper script for the named
+// shell. `multree completion install <bash|zsh>` — wire it up once instead.
 export function completionCommand(args: string[]): void {
     const shell = args[0];
+    if (shell === "install") {
+        installCompletion(args[1]);
+        return;
+    }
     if (shell === "bash") {
         process.stdout.write(BASH_COMPLETION);
         return;
@@ -23,9 +31,48 @@ export function completionCommand(args: string[]): void {
     }
     throw new Error(
         `multree completion requires a shell: bash | zsh\n` +
-            `  Bash: add to ~/.bashrc:  eval "$(multree completion bash)"\n` +
-            `  Zsh:  add to ~/.zshrc:   eval "$(multree completion zsh)"`,
+            `  One-time setup (recommended):  multree completion install <bash|zsh>\n` +
+            `  Or eval on every shell start:\n` +
+            `    Bash: add to ~/.bashrc:  eval "$(multree completion bash)"\n` +
+            `    Zsh:  add to ~/.zshrc:   eval "$(multree completion zsh)"`,
     );
+}
+
+// The wrapper scripts are static — all dynamic work happens at TAB-time via
+// `multree __complete` — so eval'ing them on every shell start pays a full Node
+// boot just to print an unchanging stub. Install writes the script to a file
+// once and points the shell rc at it; sourcing a local file is effectively free.
+function installCompletion(shell: string | undefined): void {
+    if (shell !== "bash" && shell !== "zsh") {
+        throw new Error(`multree completion install requires a shell: bash | zsh`);
+    }
+    const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+    const scriptPath = join(dataHome, "multree", `completion.${shell}`);
+    mkdirSync(dirname(scriptPath), { recursive: true });
+    writeFileSync(scriptPath, shell === "bash" ? BASH_COMPLETION : ZSH_COMPLETION);
+
+    const rcPath =
+        shell === "bash"
+            ? join(homedir(), ".bashrc")
+            : join(process.env.ZDOTDIR || homedir(), ".zshrc");
+    const sourceLine = `[ -f "${scriptPath}" ] && . "${scriptPath}"`;
+    const rc = existsSync(rcPath) ? readFileSync(rcPath, "utf-8") : "";
+    if (rc.includes(sourceLine)) {
+        console.log(`Refreshed ${scriptPath}; ${rcPath} already sources it.`);
+        return;
+    }
+    appendFileSync(
+        rcPath,
+        `\n# multree shell completion — added by \`multree completion install\`\n${sourceLine}\n`,
+    );
+    console.log(`Wrote ${scriptPath}\nAdded a source line to ${rcPath}`);
+    if (shell === "zsh") {
+        console.log(
+            `Note: completion needs compinit loaded first (oh-my-zsh and most setups do this; ` +
+                `otherwise add \`autoload -Uz compinit && compinit\` earlier in your .zshrc).`,
+        );
+    }
+    console.log(`Restart your shell (or source ${rcPath}) to activate.`);
 }
 
 function gatherProfiles(): string[] {

@@ -129,6 +129,7 @@ Usage:
   multree shell <name> [<repo>]
   multree cmux <up|down|status> <name> [--print] [--focus]
   multree completion <bash|zsh>
+  multree completion install <bash|zsh>
 ${toolsLine}
 Manifest: <$MULTREE_HOME or ~/.multree>/<profile>.yaml. Profile resolution:
   --profile <name>  >  $MULTREE_PROFILE  >  "default"  (then aliases.json, one hop).

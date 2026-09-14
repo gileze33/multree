@@ -262,12 +262,20 @@ describe("computeCandidates: profile subcommand", () => {
 });
 
 describe("computeCandidates: completion subcommand", () => {
-    it("completes the shell name", () => {
-        assert.deepEqual(computeCandidates(ctx(), ["completion", ""]), ["bash", "zsh"]);
+    it("completes the shell names and the install action", () => {
+        assert.deepEqual(computeCandidates(ctx(), ["completion", ""]), ["bash", "zsh", "install"]);
     });
 
     it("filters the shell name by prefix", () => {
         assert.deepEqual(computeCandidates(ctx(), ["completion", "z"]), ["zsh"]);
+    });
+
+    it("completes the shell name after install", () => {
+        assert.deepEqual(computeCandidates(ctx(), ["completion", "install", ""]), ["bash", "zsh"]);
+    });
+
+    it("offers nothing once install has its shell", () => {
+        assert.deepEqual(computeCandidates(ctx(), ["completion", "install", "zsh", ""]), []);
     });
 });
 
