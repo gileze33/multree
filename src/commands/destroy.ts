@@ -36,6 +36,7 @@ export async function destroyCommand(name: string): Promise<void> {
                 worktreePath: member.path,
                 repoCfg,
                 config,
+                variables: member.variables,
             });
         }
 

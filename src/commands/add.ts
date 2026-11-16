@@ -89,6 +89,7 @@ export async function addCommand(
         exposes: {},
     };
     group.members[memberName] = member;
+    assignGroupVariables(home, profile, config, group);
     saveGroup(config, group);
 
     const ctx = { repoName: memberName, groupName, repoCfg, repoPath, worktreePath };

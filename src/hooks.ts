@@ -158,6 +158,8 @@ export interface MemberHookArgs {
     repoPath: string;
     worktreePath: string;
     repoCfg: HookTimeoutSource;
+    // This member's allocated variables, surfaced to the hook as MULTREE_VAR_<KEY>.
+    variables?: Record<string, string>;
     config: MultreeConfig;
     // Only consulted for install/setup; teardown always streams live so the
     // user can see what's happening as a worktree comes down.
@@ -188,7 +190,7 @@ export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult
             timeoutMs,
             verbose,
             label: verbose ? repoName : undefined,
-            extraEnv: { MULTREE_NAME: groupName },
+            extraEnv: buildHookEnv(groupName, args.variables),
         });
         console.log(`[${repoName}] ${phase} hook done in ${formatDuration(r.durationMs)}`);
         return r;
@@ -206,6 +208,21 @@ export async function runMemberHook(args: MemberHookArgs): Promise<HookRunResult
         console.error(`[${repoName}] ${phase} failed: ${msg}`);
         return undefined;
     }
+}
+
+export function hookVariableEnvName(variable: string): string {
+    return `MULTREE_VAR_${variable.replace(/-/g, "_").toUpperCase()}`;
+}
+
+export function buildHookEnv(
+    groupName: string,
+    variables: Record<string, string> | undefined,
+): Record<string, string> {
+    const env: Record<string, string> = { MULTREE_NAME: groupName };
+    for (const [name, value] of Object.entries(variables ?? {})) {
+        env[hookVariableEnvName(name)] = value;
+    }
+    return env;
 }
 
 // Resolve which timeout (in ms) applies to a given hook, walking from

@@ -193,6 +193,11 @@ export async function createCommand(args: CreateArgs): Promise<void> {
         saveGroup(config, group);
     }
 
+    // Allocated before any hook runs so install/setup see their own values as
+    // MULTREE_VAR_<KEY>; the post-setup call below reconciles apps added later.
+    assignGroupVariables(home, profile, config, group);
+    saveGroup(config, group);
+
     // Phases prime/install/setup. Each runs across all members; prime/install
     // are independent and bounded by `jobs`. Setup respects depends_on and
     // runs serially unless `parallel_setup` is set.

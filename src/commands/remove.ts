@@ -32,6 +32,7 @@ export async function removeCommand(groupName: string, memberName: string): Prom
             worktreePath: member.path,
             repoCfg,
             config,
+            variables: member.variables,
         });
     }
 

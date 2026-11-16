@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
     HookFailureError,
     HookTimeoutError,
+    buildHookEnv,
     normalizeHook,
     resolveHookTimeout,
     runHook,
@@ -30,6 +31,20 @@ describe("normalizeHook", () => {
     it("passes through an object form with no explicit cwd", () => {
         const obj = { command: "echo hi" };
         assert.deepEqual(normalizeHook(obj), obj);
+    });
+});
+
+describe("buildHookEnv", () => {
+    it("exposes only MULTREE_NAME when the member has no variables", () => {
+        assert.deepEqual(buildHookEnv("g", undefined), { MULTREE_NAME: "g" });
+    });
+
+    it("adds each variable as MULTREE_VAR_<KEY>, upper-cased with hyphens as underscores", () => {
+        assert.deepEqual(buildHookEnv("g", { port: "4000", "debug-port": "4100" }), {
+            MULTREE_NAME: "g",
+            MULTREE_VAR_PORT: "4000",
+            MULTREE_VAR_DEBUG_PORT: "4100",
+        });
     });
 });
 
