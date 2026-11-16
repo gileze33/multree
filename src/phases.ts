@@ -44,6 +44,7 @@ export async function runMemberPhase(
         worktreePath,
         repoCfg,
         config,
+        variables: member.variables,
         verbose: opts.verbose,
     });
     if (phase === "setup") {

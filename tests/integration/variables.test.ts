@@ -143,6 +143,84 @@ describe("repo variables", () => {
         assert.equal(readPort(sb, "g3", "web", "PORT"), held);
     });
 
+    it("exposes the allocated value to the owner's install and setup hooks", () => {
+        const hookSb = createSandbox({
+            repos: [
+                {
+                    key: "web",
+                    install: trace("web:install:$MULTREE_VAR_PORT"),
+                    setup: trace("web:setup:$MULTREE_VAR_PORT"),
+                    files: { ".env": "" },
+                    variables: { port: { type: "number", min: 4000, max: 4999 } },
+                    consumes: { file: ".env", upsert: { PORT: "{web.port}" } },
+                },
+                {
+                    key: "api",
+                    setup: trace("api:setup:${MULTREE_VAR_PORT:-unset}"),
+                    files: { ".env": "" },
+                },
+            ],
+        });
+        try {
+            const r = runMultree(hookSb, ["create", "g", "--include", "web,api"]);
+            assert.equal(r.status, 0, r.stderr);
+            const port = readPort(hookSb, "g", "web", "PORT");
+            const lines = hookSb.trace();
+            assert.ok(lines.includes(`web:install:${port}`), lines.join("\n"));
+            assert.ok(lines.includes(`web:setup:${port}`), lines.join("\n"));
+            assert.ok(lines.includes("api:setup:unset"), "a member only sees its own variables");
+        } finally {
+            hookSb.cleanup();
+        }
+    });
+
+    it("exposes the allocated value to the setup hook of a repo added later", () => {
+        const hookSb = createSandbox({
+            repos: [
+                {
+                    key: "web",
+                    setup: trace("web:setup:$MULTREE_VAR_PORT"),
+                    files: { ".env": "" },
+                    variables: { port: { type: "number", min: 4000, max: 4999 } },
+                    consumes: { file: ".env", upsert: { PORT: "{web.port}" } },
+                },
+                { key: "api", setup: trace("api:setup"), files: { ".env": "" } },
+            ],
+        });
+        try {
+            assert.equal(runMultree(hookSb, ["create", "g", "--include", "api"]).status, 0);
+            const r = runMultree(hookSb, ["add", "g", "web"]);
+            assert.equal(r.status, 0, r.stderr);
+            const port = readPort(hookSb, "g", "web", "PORT");
+            assert.ok(hookSb.trace().includes(`web:setup:${port}`), hookSb.trace().join("\n"));
+        } finally {
+            hookSb.cleanup();
+        }
+    });
+
+    it("exposes the allocated value to the teardown hook", () => {
+        const hookSb = createSandbox({
+            repos: [
+                {
+                    key: "web",
+                    teardown: trace("web:teardown:$MULTREE_VAR_PORT"),
+                    files: { ".env": "" },
+                    variables: { port: { type: "number", min: 4000, max: 4999 } },
+                    consumes: { file: ".env", upsert: { PORT: "{web.port}" } },
+                },
+            ],
+        });
+        try {
+            assert.equal(runMultree(hookSb, ["create", "g", "--include", "web"]).status, 0);
+            const port = readPort(hookSb, "g", "web", "PORT");
+            const r = runMultree(hookSb, ["destroy", "g"]);
+            assert.equal(r.status, 0, r.stderr);
+            assert.ok(hookSb.trace().includes(`web:teardown:${port}`), hookSb.trace().join("\n"));
+        } finally {
+            hookSb.cleanup();
+        }
+    });
+
     it("errors clearly when the range is exhausted", () => {
         const tiny = makeSandbox(4000, 4000);
         try {
